@@ -557,12 +557,45 @@ class TeamService:
                     "error": f"获取成员列表失败: {members_result['error']}"
                 }
 
-            logger.info(f"获取 Team {team_id} 成员列表成功: 共 {members_result['total']} 个成员")
+            # 4. 调用 ChatGPT API 获取邀请列表
+            invites_result = await self.chatgpt_service.get_invites(
+                access_token,
+                team.account_id,
+                db_session
+            )
+
+            # 5. 合并列表并统一格式
+            all_members = []
+            
+            # 处理已加入成员
+            for m in members_result["members"]:
+                all_members.append({
+                    "user_id": m.get("user_id"),
+                    "email": m.get("email"),
+                    "name": m.get("name"),
+                    "role": m.get("role"),
+                    "added_at": m.get("added_at"),
+                    "status": "joined"
+                })
+            
+            # 处理待加入成员
+            if invites_result["success"]:
+                for inv in invites_result["items"]:
+                    all_members.append({
+                        "user_id": None, # 邀请还没有 user_id
+                        "email": inv.get("email_address"),
+                        "name": None,
+                        "role": inv.get("role"),
+                        "added_at": inv.get("created_time"),
+                        "status": "invited"
+                    })
+
+            logger.info(f"获取 Team {team_id} 成员列表成功: 共 {len(all_members)} 个成员 (已加入: {members_result['total']})")
 
             return {
                 "success": True,
-                "members": members_result["members"],
-                "total": members_result["total"],
+                "members": all_members,
+                "total": len(all_members),
                 "error": None
             }
 
@@ -573,6 +606,89 @@ class TeamService:
                 "members": [],
                 "total": 0,
                 "error": f"获取成员列表失败: {str(e)}"
+            }
+
+    async def revoke_team_invite(
+        self,
+        team_id: int,
+        email: str,
+        db_session: AsyncSession
+    ) -> Dict[str, Any]:
+        """
+        撤回 Team 邀请
+
+        Args:
+            team_id: Team ID
+            email: 邀请邮箱
+            db_session: 数据库会话
+
+        Returns:
+            结果字典,包含 success, message, error
+        """
+        try:
+            # 1. 查询 Team
+            stmt = select(Team).where(Team.id == team_id)
+            result = await db_session.execute(stmt)
+            team = result.scalar_one_or_none()
+
+            if not team:
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": f"Team ID {team_id} 不存在"
+                }
+
+            # 2. 解密 AT Token
+            try:
+                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
+            except Exception as e:
+                logger.error(f"解密 Token 失败: {e}")
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": f"解密 Token 失败: {str(e)}"
+                }
+
+            # 3. 调用 ChatGPT API 撤回邀请
+            revoke_result = await self.chatgpt_service.delete_invite(
+                access_token,
+                team.account_id,
+                email,
+                db_session
+            )
+
+            if not revoke_result["success"]:
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": f"撤回邀请失败: {revoke_result['error']}"
+                }
+
+            # 4. 更新成员数 (如果是按席位算的，撤回邀请应该减少)
+            if team.current_members > 0:
+                team.current_members -= 1
+            
+            if team.current_members < team.max_members:
+                if team.status == "full":
+                    team.status = "active"
+
+            await db_session.commit()
+
+            logger.info(f"撤回邀请成功: {email} from Team {team_id}")
+
+            return {
+                "success": True,
+                "message": f"已撤回对 {email} 的邀请",
+                "error": None
+            }
+
+        except Exception as e:
+            await db_session.rollback()
+            logger.error(f"撤回邀请失败: {e}")
+            return {
+                "success": False,
+                "message": None,
+                "error": f"撤回邀请失败: {str(e)}"
             }
 
     async def add_team_member(

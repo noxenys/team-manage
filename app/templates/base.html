@@ -223,21 +223,44 @@
                     </form>
                 </div>
 
-                <!-- 成员列表表格 -->
-                <div class="table-container" style="max-height: 400px; overflow-y: auto; margin: 0;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>邮箱</th>
-                                <th style="width: 100px;">角色</th>
-                                <th style="width: 160px;">加入时间</th>
-                                <th style="text-align: right; width: 100px;">操作</th>
-                            </tr>
-                        </thead>
-                        <tbody id="modalMembersTableBody">
-                            <!-- 动态加载内容 -->
-                        </tbody>
-                    </table>
+                <!-- 已加入成员 -->
+                <div class="content-section" style="margin-bottom: 1.5rem;">
+                    <h4 style="margin-bottom: 1rem; color: var(--success);">已加入成员</h4>
+                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin: 0;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>邮箱</th>
+                                    <th style="width: 100px;">角色</th>
+                                    <th style="width: 160px;">加入时间</th>
+                                    <th style="text-align: right; width: 100px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalJoinedMembersTableBody">
+                                <!-- 动态加载内容 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 待加入成员 -->
+                <div class="content-section" style="margin: 0;">
+                    <h4 style="margin-bottom: 1rem; color: var(--warning);">待加入成员 (邀请中)</h4>
+                    <div class="table-container" style="max-height: 250px; overflow-y: auto; margin: 0;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>邮箱</th>
+                                    <th style="width: 100px;">角色</th>
+                                    <th style="width: 160px;">邀请时间</th>
+                                    <th style="text-align: right; width: 100px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modalInvitedMembersTableBody">
+                                <!-- 动态加载内容 -->
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

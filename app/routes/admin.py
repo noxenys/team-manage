@@ -235,65 +235,7 @@ async def team_import(
         )
 
 
-@router.get("/teams/{team_id}/members", response_class=HTMLResponse)
-async def team_members_page(
-    team_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin)
-):
-    """
-    Team 成员管理页面
 
-    Args:
-        team_id: Team ID
-        request: FastAPI Request 对象
-        db: 数据库会话
-        current_user: 当前用户（需要登录）
-
-    Returns:
-        Team 成员管理页面 HTML
-    """
-    try:
-        from app.main import templates
-
-        logger.info(f"管理员访问 Team {team_id} 成员管理页面")
-
-        # 获取 Team 信息
-        team_result = await team_service.get_team_by_id(team_id, db)
-        if not team_result["success"]:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=team_result["error"]
-            )
-
-        # 获取成员列表
-        members_result = await team_service.get_team_members(team_id, db)
-        if not members_result["success"]:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=members_result["error"]
-            )
-
-        return templates.TemplateResponse(
-            "admin/teams/members.html",
-            {
-                "request": request,
-                "user": current_user,
-                "active_page": "teams",
-                "team": team_result["team"],
-                "members": members_result["members"]
-            }
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"加载成员管理页面失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"加载页面失败: {str(e)}"
-        )
 
 
 @router.get("/teams/{team_id}/members/list")
@@ -418,6 +360,53 @@ async def delete_team_member(
             content={
                 "success": False,
                 "error": f"删除成员失败: {str(e)}"
+            }
+        )
+
+
+@router.post("/teams/{team_id}/invites/revoke")
+async def revoke_team_invite(
+    team_id: int,
+    member_data: AddMemberRequest, # 使用相同的包含 email 的模型
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    撤回 Team 邀请
+
+    Args:
+        team_id: Team ID
+        member_data: 成员数据 (包含 email)
+        db: 数据库会话
+        current_user: 当前用户（需要登录）
+
+    Returns:
+        撤回结果
+    """
+    try:
+        logger.info(f"管理员从 Team {team_id} 撤回邀请: {member_data.email}")
+
+        result = await team_service.revoke_team_invite(
+            team_id=team_id,
+            email=member_data.email,
+            db_session=db
+        )
+
+        if not result["success"]:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.error(f"撤回邀请失败: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": f"撤回邀请失败: {str(e)}"
             }
         )
 

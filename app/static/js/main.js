@@ -418,41 +418,104 @@ async function viewMembers(teamId, teamEmail = '') {
 }
 
 async function loadModalMemberList(teamId) {
-    const tableBody = document.getElementById('modalMembersTableBody');
-    tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+    const joinedTableBody = document.getElementById('modalJoinedMembersTableBody');
+    const invitedTableBody = document.getElementById('modalInvitedMembersTableBody');
+
+    if (joinedTableBody) joinedTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+    if (invitedTableBody) invitedTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
 
     try {
         const result = await apiCall(`/admin/teams/${teamId}/members/list`);
         if (result.success) {
-            const members = result.data.members;
-            if (members.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">暂无成员</td></tr>';
-            } else {
-                tableBody.innerHTML = members.map(m => `
-                    <tr>
-                        <td>${m.email}</td>
-                        <td>
-                            <span class="role-badge role-${m.role}">
-                                ${m.role === 'account-owner' ? '所有者' : '成员'}
-                            </span>
-                        </td>
-                        <td>${formatDateTime(m.added_at)}</td>
-                        <td style="text-align: right;">
-                            ${m.role !== 'account-owner' ? `
-                                <button onclick="deleteMember('${teamId}', '${m.user_id}', '${m.email}', true)" class="btn btn-sm btn-danger">
-                                    <i data-lucide="trash-2"></i> 删除
-                                </button>
-                            ` : '<span class="text-muted">不可删除</span>'}
-                        </td>
-                    </tr>
-                `).join('');
-                if (window.lucide) lucide.createIcons();
+            const allMembers = result.data.members || [];
+            const joinedMembers = allMembers.filter(m => m.status === 'joined');
+            const invitedMembers = allMembers.filter(m => m.status === 'invited');
+
+            // 渲染已加入成员
+            if (joinedTableBody) {
+                if (joinedMembers.length === 0) {
+                    joinedTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">暂无已加入成员</td></tr>';
+                } else {
+                    joinedTableBody.innerHTML = joinedMembers.map(m => `
+                        <tr>
+                            <td>${m.email}</td>
+                            <td>
+                                <span class="role-badge role-${m.role}">
+                                    ${m.role === 'account-owner' ? '所有者' : '成员'}
+                                </span>
+                            </td>
+                            <td>${formatDateTime(m.added_at)}</td>
+                            <td style="text-align: right;">
+                                ${m.role !== 'account-owner' ? `
+                                    <button onclick="deleteMember('${teamId}', '${m.user_id}', '${m.email}', true)" class="btn btn-sm btn-danger">
+                                        <i data-lucide="trash-2"></i> 删除
+                                    </button>
+                                ` : '<span class="text-muted">不可删除</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                }
             }
+
+            // 渲染待加入成员
+            if (invitedTableBody) {
+                if (invitedMembers.length === 0) {
+                    invitedTableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 1.5rem; color: var(--text-muted);">暂无待加入成员</td></tr>';
+                } else {
+                    invitedTableBody.innerHTML = invitedMembers.map(m => `
+                        <tr>
+                            <td>${m.email}</td>
+                            <td>
+                                <span class="role-badge role-${m.role}">成员</span>
+                            </td>
+                            <td>${formatDateTime(m.added_at)}</td>
+                            <td style="text-align: right;">
+                                <button onclick="revokeInvite('${teamId}', '${m.email}', true)" class="btn btn-sm btn-warning">
+                                    <i data-lucide="undo"></i> 撤回
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            }
+
+            if (window.lucide) lucide.createIcons();
         } else {
-            tableBody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--danger);">${result.error}</td></tr>`;
+            const errorMsg = `<tr><td colspan="4" style="text-align: center; color: var(--danger);">${result.error}</td></tr>`;
+            if (joinedTableBody) joinedTableBody.innerHTML = errorMsg;
+            if (invitedTableBody) invitedTableBody.innerHTML = errorMsg;
         }
     } catch (error) {
-        tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--danger);">加载失败</td></tr>';
+        const errorMsg = '<tr><td colspan="4" style="text-align: center; color: var(--danger);">加载失败</td></tr>';
+        if (joinedTableBody) joinedTableBody.innerHTML = errorMsg;
+        if (invitedTableBody) invitedTableBody.innerHTML = errorMsg;
+    }
+}
+
+async function revokeInvite(teamId, email, inModal = false) {
+    if (!confirm(`确定要撤回对 "${email}" 的邀请吗？`)) {
+        return;
+    }
+
+    try {
+        showToast('正在撤回...', 'info');
+        const result = await apiCall(`/admin/teams/${teamId}/invites/revoke`, {
+            method: 'POST',
+            body: JSON.stringify({ email: email })
+        });
+
+        if (result.success) {
+            showToast('撤回成功', 'success');
+            if (inModal) {
+                await loadModalMemberList(teamId);
+            } else {
+                setTimeout(() => location.reload(), 1000);
+            }
+        } else {
+            showToast(result.error || '撤回失败', 'error');
+        }
+    } catch (error) {
+        showToast('网络错误', 'error');
     }
 }
 

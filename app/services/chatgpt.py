@@ -100,7 +100,7 @@ class ChatGPTService:
                 elif method == "POST":
                     response = await self.session.post(url, headers=headers, json=json_data)
                 elif method == "DELETE":
-                    response = await self.session.delete(url, headers=headers)
+                    response = await self.session.delete(url, headers=headers, json=json_data)
                 else:
                     raise ValueError(f"不支持的 HTTP 方法: {method}")
 
@@ -309,6 +309,90 @@ class ChatGPTService:
             "total": len(all_members),
             "error": None
         }
+
+    async def get_invites(
+        self,
+        access_token: str,
+        account_id: str,
+        db_session: DBAsyncSession
+    ) -> Dict[str, Any]:
+        """
+        获取 Team 待加入成员列表 (邀请列表)
+
+        Args:
+            access_token: AT Token
+            account_id: Account ID
+            db_session: 数据库会话
+
+        Returns:
+            结果字典,包含 success, items (邀请列表), total (总数), error
+        """
+        url = f"{self.BASE_URL}/accounts/{account_id}/invites"
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "chatgpt-account-id": account_id
+        }
+
+        logger.info(f"获取邀请列表: Team {account_id}")
+
+        result = await self._make_request("GET", url, headers, db_session=db_session)
+
+        if not result["success"]:
+            return {
+                "success": False,
+                "items": [],
+                "total": 0,
+                "error": result["error"]
+            }
+
+        data = result["data"]
+        items = data.get("items", [])
+        total = data.get("total", 0)
+
+        return {
+            "success": True,
+            "items": items,
+            "total": total,
+            "error": None
+        }
+
+    async def delete_invite(
+        self,
+        access_token: str,
+        account_id: str,
+        email: str,
+        db_session: DBAsyncSession
+    ) -> Dict[str, Any]:
+        """
+        撤回 Team 邀请
+
+        Args:
+            access_token: AT Token
+            account_id: Account ID
+            email: 邀请的邮箱地址
+            db_session: 数据库会话
+
+        Returns:
+            结果字典,包含 success, status_code, error
+        """
+        url = f"{self.BASE_URL}/accounts/{account_id}/invites"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+            "chatgpt-account-id": account_id
+        }
+
+        json_data = {
+            "email_address": email
+        }
+
+        logger.info(f"撤回邀请: {email} from Team {account_id}")
+
+        result = await self._make_request("DELETE", url, headers, json_data, db_session)
+
+        return result
 
     async def delete_member(
         self,
