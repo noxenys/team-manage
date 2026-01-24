@@ -53,6 +53,7 @@
         <table class="data-table">
             <thead>
                 <tr>
+                    <th>ID</th>
                     <th>邮箱</th>
                     <th>Team 名称</th>
                     <th>成员数</th>
@@ -65,6 +66,7 @@
             <tbody>
                 {% for team in teams %}
                 <tr>
+                    <td><span class="text-muted">{{ team.id }}</span></td>
                     <td>{{ team.email }}</td>
                     <td>{{ team.team_name or '-' }}</td>
                     <td>

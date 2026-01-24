@@ -711,10 +711,10 @@ async def records_page(
     request: Request,
     email: Optional[str] = None,
     code: Optional[str] = None,
-    team_id: Optional[int] = None,
+    team_id: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    page: int = 1,
+    page: Optional[str] = "1",
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -740,7 +740,18 @@ async def records_page(
         from datetime import datetime, timedelta
         import math
 
-        logger.info(f"管理员访问使用记录页面 (page={page})")
+        # 解析参数
+        try:
+            actual_team_id = int(team_id) if team_id and team_id.strip() else None
+        except (ValueError, TypeError):
+            actual_team_id = None
+            
+        try:
+            page_int = int(page) if page and page.strip() else 1
+        except (ValueError, TypeError):
+            page_int = 1
+            
+        logger.info(f"管理员访问使用记录页面 (page={page_int})")
 
         # 获取所有记录
         records_result = await redemption_service.get_all_records(db)
@@ -758,7 +769,7 @@ async def records_page(
                 continue
 
             # Team ID 筛选
-            if team_id and record["team_id"] != team_id:
+            if actual_team_id is not None and record["team_id"] != actual_team_id:
                 continue
 
             # 日期范围筛选
@@ -821,12 +832,12 @@ async def records_page(
         total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
 
         # 确保页码有效
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
+        if page_int < 1:
+            page_int = 1
+        if page_int > total_pages:
+            page_int = total_pages
 
-        start_idx = (page - 1) * per_page
+        start_idx = (page_int - 1) * per_page
         end_idx = start_idx + per_page
         paginated_records = filtered_records[start_idx:end_idx]
 
@@ -854,7 +865,7 @@ async def records_page(
                     "end_date": end_date
                 },
                 "pagination": {
-                    "current_page": page,
+                    "current_page": page_int,
                     "total_pages": total_pages,
                     "total": total_records,
                     "per_page": per_page
