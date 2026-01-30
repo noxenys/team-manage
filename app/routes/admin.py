@@ -55,6 +55,20 @@ class CodeGenerateRequest(BaseModel):
     has_warranty: bool = Field(False, description="是否为质保兑换码")
 
 
+class TeamUpdateRequest(BaseModel):
+    """Team 更新请求"""
+    email: Optional[str] = Field(None, description="新邮箱")
+    account_id: Optional[str] = Field(None, description="新 Account ID")
+    access_token: Optional[str] = Field(None, description="新 Access Token")
+    max_members: Optional[int] = Field(None, description="最大成员数")
+    status: Optional[str] = Field(None, description="状态: active/full/expired/error/banned")
+
+
+class CodeUpdateRequest(BaseModel):
+    """兑换码更新请求"""
+    has_warranty: bool = Field(..., description="是否为质保兑换码")
+
+
 @router.get("/", response_class=HTMLResponse)
 async def admin_dashboard(
     request: Request,
@@ -156,6 +170,59 @@ async def delete_team(
                 "success": False,
                 "error": f"删除 Team 失败: {str(e)}"
             }
+        )
+
+
+@router.get("/teams/{team_id}/info")
+async def get_team_info(
+    team_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """获取 Team 详情 (包含解密后的 Token)"""
+    try:
+        result = await team_service.get_team_by_id(team_id, db)
+        if not result["success"]:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=result
+            )
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@router.post("/teams/{team_id}/update")
+async def update_team(
+    team_id: int,
+    update_data: TeamUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """更新 Team 信息"""
+    try:
+        result = await team_service.update_team(
+            team_id=team_id,
+            db_session=db,
+            email=update_data.email,
+            account_id=update_data.account_id,
+            access_token=update_data.access_token,
+            max_members=update_data.max_members,
+            status=update_data.status
+        )
+        if not result["success"]:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": str(e)}
         )
 
 
@@ -735,6 +802,33 @@ async def export_codes(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"导出失败: {str(e)}"
+        )
+
+
+@router.post("/codes/{code}/update")
+async def update_code(
+    code: str,
+    update_data: CodeUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """更新兑换码信息"""
+    try:
+        result = await redemption_service.update_code(
+            code=code,
+            db_session=db,
+            has_warranty=update_data.has_warranty
+        )
+        if not result["success"]:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content=result
+            )
+        return JSONResponse(content=result)
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"success": False, "error": str(e)}
         )
 
 

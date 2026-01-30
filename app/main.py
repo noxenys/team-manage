@@ -38,7 +38,12 @@ async def lifespan(app: FastAPI):
         
         # 1. 创建数据库表
         await init_db()
-        # 2. 初始化管理员密码（如果不存在）
+        
+        # 2. 运行自动数据库迁移
+        from app.db_migrations import run_auto_migration
+        run_auto_migration()
+        
+        # 3. 初始化管理员密码（如果不存在）
         async with AsyncSessionLocal() as session:
             await auth_service.initialize_admin_password(session)
         logger.info("数据库初始化完成")

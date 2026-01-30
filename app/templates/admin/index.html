@@ -113,17 +113,21 @@
                     </td>
                     <td>
                         <div class="action-buttons">
-                            <button class="btn btn-sm btn-info btn-view-members" data-id="{{ team.id }}"
-                                data-email="{{ team.email }}" title="查看成员">
-                                <i data-lucide="users"></i> 成员
+                            <button class="btn btn-sm btn-icon btn-minimal btn-info btn-view-members"
+                                data-id="{{ team.id }}" data-email="{{ team.email }}" title="查看成员">
+                                <i data-lucide="users" style="width: 16px; height: 16px;"></i>
                             </button>
-                            <button class="btn btn-sm btn-secondary btn-refresh-team" data-id="{{ team.id }}"
-                                title="刷新">
-                                <i data-lucide="refresh-cw"></i> 刷新
+                            <button class="btn btn-sm btn-icon btn-minimal btn-primary btn-edit-team"
+                                data-id="{{ team.id }}" title="编辑">
+                                <i data-lucide="edit-3" style="width: 16px; height: 16px;"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger btn-delete-team" data-id="{{ team.id }}"
-                                data-email="{{ team.email }}" title="删除">
-                                <i data-lucide="trash-2"></i> 删除
+                            <button class="btn btn-sm btn-icon btn-minimal btn-secondary btn-refresh-team"
+                                data-id="{{ team.id }}" title="刷新">
+                                <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+                            </button>
+                            <button class="btn btn-sm btn-icon btn-minimal btn-danger btn-delete-team"
+                                data-id="{{ team.id }}" data-email="{{ team.email }}" title="删除">
+                                <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
                             </button>
                         </div>
                     </td>
@@ -162,6 +166,49 @@
     </div>
     {% endif %}
 </div>
+
+<!-- 编辑 Team 模态框 -->
+<div id="editTeamModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>编辑 Team 信息</h3>
+            <button class="modal-close" onclick="hideModal('editTeamModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="editTeamForm" onsubmit="handleEditTeam(event)">
+                <input type="hidden" id="edit-team-id" name="teamId">
+                <div class="form-group">
+                    <label>邮箱 <span class="required">*</span></label>
+                    <input type="email" id="edit-team-email" name="email" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Access Token (AT) <span class="required">*</span></label>
+                    <textarea id="edit-team-token" name="accessToken" class="form-control" rows="4" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Account ID <span class="required">*</span></label>
+                    <input type="text" id="edit-team-account-id" name="accountId" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>最大成员数 <span class="required">*</span></label>
+                    <input type="number" id="edit-team-max-members" name="maxMembers" class="form-control" min="1"
+                        max="100" required>
+                </div>
+                <div class="form-group">
+                    <label>状态 <span class="required">*</span></label>
+                    <select id="edit-team-status" name="status" class="form-control" required>
+                        <option value="active">活跃 (Active)</option>
+                        <option value="full">已满 (Full)</option>
+                        <option value="expired">已过期 (Expired)</option>
+                        <option value="error">异常 (Error)</option>
+                        <option value="banned">已封禁 (Banned)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">保存修改</button>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_css %}
@@ -193,6 +240,14 @@
                 const id = btn.getAttribute('data-id');
                 const email = btn.getAttribute('data-email');
                 deleteTeam(id, email);
+            });
+        });
+
+        // 绑定编辑按钮
+        document.querySelectorAll('.btn-edit-team').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-id');
+                editTeam(id);
             });
         });
     });
@@ -239,6 +294,61 @@
                 setTimeout(() => location.reload(), 1000);
             } else {
                 showToast(data.error || '删除失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    }
+    async function editTeam(teamId) {
+        try {
+            const response = await fetch(`/admin/teams/${teamId}/info`);
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                const team = data.team;
+                document.getElementById('edit-team-id').value = team.id;
+                document.getElementById('edit-team-email').value = team.email;
+                document.getElementById('edit-team-token').value = team.access_token || '';
+                document.getElementById('edit-team-account-id').value = team.account_id || '';
+                document.getElementById('edit-team-max-members').value = team.max_members || 6;
+                document.getElementById('edit-team-status').value = team.status || 'active';
+                showModal('editTeamModal');
+            } else {
+                showToast(data.error || '获取信息失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    }
+
+    async function handleEditTeam(event) {
+        event.preventDefault();
+        const teamId = document.getElementById('edit-team-id').value;
+        const payload = {
+            email: document.getElementById('edit-team-email').value,
+            access_token: document.getElementById('edit-team-token').value,
+            account_id: document.getElementById('edit-team-account-id').value,
+            max_members: parseInt(document.getElementById('edit-team-max-members').value),
+            status: document.getElementById('edit-team-status').value
+        };
+
+        try {
+            const response = await fetch(`/admin/teams/${teamId}/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                showToast('更新成功', 'success');
+                hideModal('editTeamModal');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast(result.error || '更新失败', 'error');
             }
         } catch (error) {
             showToast('网络错误', 'error');

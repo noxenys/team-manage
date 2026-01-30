@@ -328,27 +328,30 @@ class RedeemFlowService:
                     if redemption_code.has_warranty:
                         # 检查是否有其他成功的兑换记录
                         stmt = select(RedemptionRecord).where(
-                            and_(
-                                RedemptionRecord.code == code,
-                                RedemptionRecord.team_id != team_id
-                            )
-                        )
+                            RedemptionRecord.code == code
+                        ).order_by(RedemptionRecord.redeemed_at.desc())
                         result = await db_session.execute(stmt)
-                        other_records = result.scalars().first()
-                        if other_records:
-                            # 有其他记录，保持 warranty_active
+                        other_record = result.scalars().first()
+                        
+                        if other_record:
+                            # 有其他记录，恢复为最后一次成功的状态
                             redemption_code.status = "warranty_active"
+                            redemption_code.used_by_email = other_record.email
+                            redemption_code.used_team_id = other_record.team_id
+                            redemption_code.used_at = other_record.redeemed_at
                         else:
-                            # 没有其他记录，回退到 unused
+                            # 没有其他成功记录，彻底回退到未使用
                             redemption_code.status = "unused"
                             redemption_code.warranty_expires_at = None
+                            redemption_code.used_by_email = None
+                            redemption_code.used_team_id = None
+                            redemption_code.used_at = None
                     else:
-                        # 普通码回退到 unused
+                        # 普通码彻底回退到 unused
                         redemption_code.status = "unused"
-                    
-                    redemption_code.used_by_email = None
-                    redemption_code.used_team_id = None
-                    redemption_code.used_at = None
+                        redemption_code.used_by_email = None
+                        redemption_code.used_team_id = None
+                        redemption_code.used_at = None
 
                 # 回退 Team 计数
                 stmt = select(Team).where(Team.id == team_id).with_for_update()

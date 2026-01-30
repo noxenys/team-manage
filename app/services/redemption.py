@@ -256,7 +256,7 @@ class RedemptionService:
                 }
 
             # 2. 检查状态
-            if redemption_code.status != "unused":
+            if redemption_code.status not in ["unused", "warranty_active"]:
                 reason = "兑换码已被使用" if redemption_code.status == "used" else f"兑换码已{redemption_code.status}"
                 return {
                     "success": True,
@@ -687,6 +687,59 @@ class RedemptionService:
                 "success": False,
                 "message": None,
                 "error": f"删除兑换码失败: {str(e)}"
+            }
+
+    async def update_code(
+        self,
+        code: str,
+        db_session: AsyncSession,
+        has_warranty: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        """
+        更新兑换码信息
+
+        Args:
+            code: 兑换码
+            db_session: 数据库会话
+            has_warranty: 是否为质保兑换码 (可选)
+
+        Returns:
+            结果字典,包含 success, message, error
+        """
+        try:
+            # 查询兑换码
+            stmt = select(RedemptionCode).where(RedemptionCode.code == code)
+            result = await db_session.execute(stmt)
+            redemption_code = result.scalar_one_or_none()
+
+            if not redemption_code:
+                return {
+                    "success": False,
+                    "message": None,
+                    "error": f"兑换码 {code} 不存在"
+                }
+
+            # 更新质保状态
+            if has_warranty is not None:
+                redemption_code.has_warranty = has_warranty
+
+            await db_session.commit()
+
+            logger.info(f"更新兑换码成功: {code}")
+
+            return {
+                "success": True,
+                "message": f"兑换码 {code} 已更新",
+                "error": None
+            }
+
+        except Exception as e:
+            await db_session.rollback()
+            logger.error(f"更新兑换码失败: {e}")
+            return {
+                "success": False,
+                "message": None,
+                "error": f"更新兑换码失败: {str(e)}"
             }
 
 

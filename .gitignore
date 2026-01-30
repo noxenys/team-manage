@@ -64,3 +64,6 @@ nul
 CLAUDE.md
 openai-api.md
 .gitignore
+team_manage.db-shm
+team_manage.db-wal
+DATABASE_MIGRATION.md

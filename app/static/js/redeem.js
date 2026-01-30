@@ -265,13 +265,22 @@ function formatDate(dateString) {
 
 // 查询质保状态
 async function checkWarranty() {
-    const email = document.getElementById('email').value.trim();
-    const code = document.getElementById('code').value.trim();
+    const input = document.getElementById('warrantyInput').value.trim();
 
-    // 至少需要提供一个
-    if (!email && !code) {
-        showToast('请至少填写邮箱或兑换码', 'error');
+    // 验证输入
+    if (!input) {
+        showToast('请输入原兑换码或邮箱进行查询', 'error');
         return;
+    }
+
+    let email = null;
+    let code = null;
+
+    // 简单判断是邮箱还是兑换码
+    if (input.includes('@')) {
+        email = input;
+    } else {
+        code = input;
     }
 
     const checkBtn = document.getElementById('checkWarrantyBtn');

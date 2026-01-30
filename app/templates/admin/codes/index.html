@@ -86,6 +86,7 @@
                     <th>过期时间</th>
                     <th>使用者邮箱</th>
                     <th>使用时间</th>
+                    <th>质保</th>
                     <th style="text-align: right;">操作</th>
                 </tr>
             </thead>
@@ -103,6 +104,8 @@
                         <span class="status-badge status-active">未使用</span>
                         {% elif code.status == 'used' %}
                         <span class="status-badge status-full">已使用</span>
+                        {% elif code.status == 'warranty_active' %}
+                        <span class="status-badge status-info">质保中</span>
                         {% elif code.status == 'expired' %}
                         <span class="status-badge status-error">已过期</span>
                         {% endif %}
@@ -111,14 +114,28 @@
                     <td>{{ code.expires_at if code.expires_at else '永久有效' }}</td>
                     <td>{{ code.used_by_email if code.used_by_email else '-' }}</td>
                     <td>{{ code.used_at if code.used_at else '-' }}</td>
+                    <td>
+                        {% if code.has_warranty %}
+                        <span class="status-badge status-info">是</span>
+                        {% else %}
+                        <span class="status-badge" style="background: #f3f4f6; color: #6b7280;">否</span>
+                        {% endif %}
+                    </td>
                     <td style="text-align: right;">
                         <div class="action-buttons" style="justify-content: flex-end;">
-                            <button onclick="copyCode('{{ code.code }}')" class="btn btn-sm btn-secondary" title="复制">
-                                <i data-lucide="copy"></i>
+                            <button onclick="copyCode('{{ code.code }}')"
+                                class="btn btn-sm btn-icon btn-minimal btn-secondary" title="复制">
+                                <i data-lucide="copy" style="width: 14px; height: 14px;"></i>
+                            </button>
+                            <button
+                                onclick="editCode('{{ code.code }}', {{ 'true' if code.has_warranty else 'false' }})"
+                                class="btn btn-sm btn-icon btn-minimal btn-info" title="编辑">
+                                <i data-lucide="edit-3" style="width: 14px; height: 14px;"></i>
                             </button>
                             {% if code.status == 'unused' %}
-                            <button onclick="deleteCode('{{ code.code }}')" class="btn btn-sm btn-danger" title="删除">
-                                <i data-lucide="trash-2"></i>
+                            <button onclick="deleteCode('{{ code.code }}')"
+                                class="btn btn-sm btn-icon btn-minimal btn-danger" title="删除">
+                                <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
                             </button>
                             {% endif %}
                         </div>
@@ -158,6 +175,34 @@
         <button onclick="showModal('generateCodeModal')" class="btn btn-primary">立即生成</button>
     </div>
     {% endif %}
+</div>
+
+<!-- 编辑兑换码模态框 -->
+<div id="editCodeModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>编辑兑换码</h3>
+            <button class="modal-close" onclick="hideModal('editCodeModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="editCodeForm" onsubmit="handleEditCode(event)">
+                <input type="hidden" id="edit-code" name="code">
+                <div class="form-group">
+                    <label>兑换码</label>
+                    <input type="text" id="edit-code-display" class="form-control" readonly
+                        style="background: rgba(0,0,0,0.05);">
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 1rem;">
+                        <input type="checkbox" id="edit-has-warranty" name="hasWarranty"
+                            style="width: auto; margin: 0;">
+                        <span>质保兑换码 (一个月内可重复使用)</span>
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-primary">保存修改</button>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -244,6 +289,42 @@
                 showToast('导出成功', 'success');
             } else {
                 showToast('导出失败', 'error');
+            }
+        } catch (error) {
+            showToast('网络错误', 'error');
+        }
+    }
+
+    // 编辑兑换码
+    function editCode(code, hasWarranty) {
+        document.getElementById('edit-code').value = code;
+        document.getElementById('edit-code-display').value = code;
+        document.getElementById('edit-has-warranty').checked = hasWarranty;
+        showModal('editCodeModal');
+    }
+
+    async function handleEditCode(event) {
+        event.preventDefault();
+        const code = document.getElementById('edit-code').value;
+        const has_warranty = document.getElementById('edit-has-warranty').checked;
+
+        try {
+            const response = await fetch(`/admin/codes/${encodeURIComponent(code)}/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ has_warranty })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.success) {
+                showToast('更新成功', 'success');
+                hideModal('editCodeModal');
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                showToast(result.error || '更新失败', 'error');
             }
         } catch (error) {
             showToast('网络错误', 'error');

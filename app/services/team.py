@@ -29,18 +29,26 @@ class TeamService:
         self.token_parser = TokenParser()
         self.jwt_parser = JWTParser()
 
-    async def _check_and_handle_banned(self, result: Dict[str, Any], team: Team, db_session: AsyncSession) -> bool:
+    async def _handle_api_error(self, result: Dict[str, Any], team: Team, db_session: AsyncSession) -> bool:
         """
-        检查结果是否表示账号被封禁,如果是则更新状态
+        检查结果是否表示账号被封禁或 Token 失效,如果是则更新状态
         
         Returns:
-            bool: 是否已封禁
+            bool: 是否已处理致命错误
         """
-        if result.get("error_code") == "account_deactivated":
+        error_code = result.get("error_code")
+        if error_code == "account_deactivated":
             logger.warning(f"检测到账号封禁 (account_deactivated),更新 Team {team.id} 状态为 banned")
             team.status = "banned"
             await db_session.commit()
             return True
+        
+        if error_code == "token_invalidated":
+            logger.warning(f"检测到 Token 失效 (token_invalidated),更新 Team {team.id} 状态为 error")
+            team.status = "error"
+            await db_session.commit()
+            return True
+            
         return False
 
     async def import_team_single(
@@ -257,6 +265,94 @@ class TeamService:
                 "error": f"导入失败: {str(e)}"
             }
 
+    async def update_team(
+        self,
+        team_id: int,
+        db_session: AsyncSession,
+        access_token: Optional[str] = None,
+        email: Optional[str] = None,
+        account_id: Optional[str] = None,
+        max_members: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        更新 Team 信息
+
+        Args:
+            team_id: Team ID
+            db_session: 数据库会话
+            access_token: 新的 AT Token (可选)
+            email: 新的邮箱 (可选)
+            account_id: 新的 Account ID (可选)
+            max_members: 最大成员数 (可选)
+
+        Returns:
+            结果字典
+        """
+        try:
+            stmt = select(Team).where(Team.id == team_id)
+            result = await db_session.execute(stmt)
+            team = result.scalar_one_or_none()
+
+            if not team:
+                return {"success": False, "error": f"Team ID {team_id} 不存在"}
+
+            if access_token:
+                team.access_token_encrypted = encryption_service.encrypt_token(access_token)
+            if email:
+                team.email = email
+            if account_id:
+                team.account_id = account_id
+            if max_members is not None:
+                team.max_members = max_members
+
+            # 更新状态
+            if team.current_members >= team.max_members:
+                team.status = "full"
+            elif team.status == "full" and team.current_members < team.max_members:
+                team.status = "active"
+
+            await db_session.commit()
+            logger.info(f"Team {team_id} 信息更新成功")
+            return {"success": True, "message": "Team 信息更新成功"}
+
+        except Exception as e:
+            await db_session.rollback()
+            logger.error(f"更新 Team 失败: {e}")
+            return {"success": False, "error": f"更新失败: {str(e)}"}
+
+    async def get_team_info(self, team_id: int, db_session: AsyncSession) -> Dict[str, Any]:
+        """获取 Team 详细信息 (含解密 Token)"""
+        try:
+            stmt = select(Team).where(Team.id == team_id)
+            result = await db_session.execute(stmt)
+            team = result.scalar_one_or_none()
+
+            if not team:
+                return {"success": False, "error": "Team 不存在"}
+
+            # 解密 Token
+            access_token = ""
+            try:
+                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
+            except Exception as e:
+                logger.error(f"解密 Token 失败: {e}")
+
+            return {
+                "success": True,
+                "team": {
+                    "id": team.id,
+                    "email": team.email,
+                    "account_id": team.account_id,
+                    "max_members": team.max_members,
+                    "access_token": access_token,
+                    "team_name": team.team_name,
+                    "status": team.status
+                }
+            }
+        except Exception as e:
+            logger.error(f"获取 Team 信息失败: {e}")
+            return {"success": False, "error": str(e)}
+
     async def import_team_batch(
         self,
         text: str,
@@ -387,12 +483,18 @@ class TeamService:
             )
 
             if not account_result["success"]:
-                # 检查是否封号
-                if await self._check_and_handle_banned(account_result, team, db_session):
+                # 检查是否封号或 Token 失效
+                if await self._handle_api_error(account_result, team, db_session):
+                    error_msg = account_result.get("error", "未知错误")
+                    if account_result.get("error_code") == "account_deactivated":
+                        error_msg = "账号已封禁 (account_deactivated)"
+                    elif account_result.get("error_code") == "token_invalidated":
+                        error_msg = "Token 已失效 (token_invalidated)"
+                        
                     return {
                         "success": False,
                         "message": None,
-                        "error": "账号已封禁 (account_deactivated)"
+                        "error": error_msg
                     }
 
                 # 更新状态为 error
@@ -718,12 +820,18 @@ class TeamService:
             )
 
             if not revoke_result["success"]:
-                # 检查是否封号
-                if await self._check_and_handle_banned(revoke_result, team, db_session):
+                # 检查是否封号或 Token 失效
+                if await self._handle_api_error(revoke_result, team, db_session):
+                    error_msg = revoke_result.get("error", "未知错误")
+                    if revoke_result.get("error_code") == "account_deactivated":
+                        error_msg = "账号已封禁 (account_deactivated)"
+                    elif revoke_result.get("error_code") == "token_invalidated":
+                        error_msg = "Token 已失效 (token_invalidated)"
+                        
                     return {
                         "success": False,
                         "message": None,
-                        "error": "账号已封禁 (account_deactivated)"
+                        "error": error_msg
                     }
 
                 return {
@@ -824,12 +932,18 @@ class TeamService:
             )
 
             if not invite_result["success"]:
-                # 检查是否封号
-                if await self._check_and_handle_banned(invite_result, team, db_session):
+                # 检查是否封号或 Token 失效
+                if await self._handle_api_error(invite_result, team, db_session):
+                    error_msg = invite_result.get("error", "未知错误")
+                    if invite_result.get("error_code") == "account_deactivated":
+                        error_msg = "账号已封禁 (account_deactivated)"
+                    elif invite_result.get("error_code") == "token_invalidated":
+                        error_msg = "Token 已失效 (token_invalidated)"
+                        
                     return {
                         "success": False,
                         "message": None,
-                        "error": "账号已封禁 (account_deactivated)"
+                        "error": error_msg
                     }
 
                 return {
@@ -912,12 +1026,18 @@ class TeamService:
             )
 
             if not delete_result["success"]:
-                # 检查是否封号
-                if await self._check_and_handle_banned(delete_result, team, db_session):
+                # 检查是否封号或 Token 失效
+                if await self._handle_api_error(delete_result, team, db_session):
+                    error_msg = delete_result.get("error", "未知错误")
+                    if delete_result.get("error_code") == "account_deactivated":
+                        error_msg = "账号已封禁 (account_deactivated)"
+                    elif delete_result.get("error_code") == "token_invalidated":
+                        error_msg = "Token 已失效 (token_invalidated)"
+                        
                     return {
                         "success": False,
                         "message": None,
-                        "error": "账号已封禁 (account_deactivated)"
+                        "error": error_msg
                     }
 
                 return {
@@ -1069,11 +1189,20 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
+            # 解密 Access Token
+            try:
+                from app.services.encryption import encryption_service
+                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
+            except Exception as e:
+                logger.error(f"解密 Team {team_id} Token 失败: {e}")
+                access_token = None
+
             # 构建返回数据
             team_data = {
                 "id": team.id,
                 "email": team.email,
                 "account_id": team.account_id,
+                "access_token": access_token,
                 "team_name": team.team_name,
                 "plan_type": team.plan_type,
                 "subscription_plan": team.subscription_plan,
@@ -1210,7 +1339,10 @@ class TeamService:
         team_id: int,
         db_session: AsyncSession,
         email: Optional[str] = None,
-        account_id: Optional[str] = None
+        account_id: Optional[str] = None,
+        access_token: Optional[str] = None,
+        max_members: Optional[int] = None,
+        status: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         更新 Team 信息
@@ -1239,41 +1371,51 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
-            # 2. 更新邮箱
+            # 2. 更新属性
             if email:
                 team.email = email
 
-            # 3. 更新 account_id (切换 Team)
             if account_id:
-                # 检查 account_id 是否存在于 team_accounts 中
-                account_exists = False
+                team.account_id = account_id
+                # 更新关联账户的主次状态
                 for acc in team.team_accounts:
                     if acc.account_id == account_id:
-                        account_exists = True
-                        # 更新 is_primary
                         acc.is_primary = True
                     else:
                         acc.is_primary = False
 
-                if not account_exists:
+            # 4. 更新 Access Token
+            if access_token:
+                try:
+                    from app.services.encryption import encryption_service
+                    team.access_token_encrypted = encryption_service.encrypt_token(access_token)
+                except Exception as e:
+                    logger.error(f"重新加密 Team {team_id} Token 失败: {e}")
                     return {
                         "success": False,
                         "message": None,
-                        "error": f"Account ID {account_id} 不存在于该 Team 的账户列表中"
+                        "error": f"加密 Token 失败: {str(e)}"
                     }
 
-                team.account_id = account_id
+            # 5. 更新最大成员数
+            if max_members is not None:
+                team.max_members = max_members
+                # 更新状态
+                if team.current_members >= max_members:
+                    if team.status == "active":
+                        team.status = "full"
+                elif team.status == "full":
+                    team.status = "active"
 
-                # 同步新 account 的信息
-                sync_result = await self.sync_team_info(team_id, db_session)
-                if not sync_result["success"]:
-                    return {
-                        "success": False,
-                        "message": None,
-                        "error": f"切换 Account 后同步失败: {sync_result['error']}"
-                    }
+            # 6. 更新状态 (手动覆盖)
+            if status:
+                team.status = status
 
             await db_session.commit()
+
+            # 6. 如果更新了 AT 或 account_id，触发一次同步以确保状态正确
+            if access_token or account_id:
+                await self.sync_team_info(team_id, db_session)
 
             logger.info(f"更新 Team {team_id} 成功")
 
