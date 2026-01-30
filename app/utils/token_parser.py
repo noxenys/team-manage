@@ -22,6 +22,15 @@ class TokenParser:
     # Account ID 正则 (UUID 格式)
     ACCOUNT_ID_PATTERN = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
+    # Refresh Token 正则
+    REFRESH_TOKEN_PATTERN = r'rt-[A-Za-z0-9_-]+'
+    
+    # Session Token 正则 (通常比较长，包含两个点)
+    SESSION_TOKEN_PATTERN = r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)?'
+
+    # Client ID 正则 (根据用户提供的信息: app_ 开头)
+    CLIENT_ID_PATTERN = r'app_[A-Za-z0-9]+'
+
     def extract_jwt_tokens(self, text: str) -> List[str]:
         """
         从文本中提取所有 JWT Token
@@ -94,6 +103,9 @@ class TokenParser:
             token = None
             email = None
             account_id = None
+            refresh_token = None
+            session_token = None
+            client_id = None
 
             # 1. 尝试使用分隔符解析 (支持 ----, | , \t, 以及多个空格)
             parts = [p.strip() for p in re.split(r'----|\||\t|\s{2,}', line) if p.strip()]
@@ -107,25 +119,47 @@ class TokenParser:
                         email = part
                     elif not account_id and re.fullmatch(self.ACCOUNT_ID_PATTERN, part, re.IGNORECASE):
                         account_id = part
+                    elif not refresh_token and re.match(self.REFRESH_TOKEN_PATTERN, part):
+                        refresh_token = part
+                    elif not session_token and re.match(self.SESSION_TOKEN_PATTERN, part):
+                        # 如果已经有了 token (JWT)，则第二个匹配 JWT 模式的可能是 session_token
+                        if token:
+                            session_token = part
+                        else:
+                            token = part
+                    elif not client_id and re.match(self.CLIENT_ID_PATTERN, part):
+                        client_id = part
 
             # 2. 如果结构化解析未找到 Token，尝试全局正则提取结果 (兜底逻辑)
             if not token:
                 tokens = re.findall(self.JWT_PATTERN, line)
                 if tokens:
                     token = tokens[0]
-                    # 只有在非结构化情况下才全局提取其他信息
-                    if not email:
-                        emails = re.findall(self.EMAIL_PATTERN, line)
-                        email = emails[0] if emails else None
-                    if not account_id:
-                        account_ids = re.findall(self.ACCOUNT_ID_PATTERN, line, re.IGNORECASE)
-                        account_id = account_ids[0] if account_ids else None
+                    if len(tokens) > 1:
+                        session_token = tokens[1]
+                
+                # 只有在非结构化情况下才全局提取其他信息
+                if not email:
+                    emails = re.findall(self.EMAIL_PATTERN, line)
+                    email = emails[0] if emails else None
+                if not account_id:
+                    account_ids = re.findall(self.ACCOUNT_ID_PATTERN, line, re.IGNORECASE)
+                    account_id = account_ids[0] if account_ids else None
+                if not refresh_token:
+                    rts = re.findall(self.REFRESH_TOKEN_PATTERN, line)
+                    refresh_token = rts[0] if rts else None
+                if not client_id:
+                    cids = re.findall(self.CLIENT_ID_PATTERN, line)
+                    client_id = cids[0] if cids else None
 
-            if token:
+            if token or session_token or refresh_token:
                 results.append({
                     "token": token,
                     "email": email,
-                    "account_id": account_id
+                    "account_id": account_id,
+                    "refresh_token": refresh_token,
+                    "session_token": session_token,
+                    "client_id": client_id
                 })
 
         logger.info(f"解析完成,共提取 {len(results)} 条 Team 信息")

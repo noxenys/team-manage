@@ -183,7 +183,19 @@
                 </div>
                 <div class="form-group">
                     <label>Access Token (AT) <span class="required">*</span></label>
-                    <textarea id="edit-team-token" name="accessToken" class="form-control" rows="4" required></textarea>
+                    <textarea id="edit-team-token" name="accessToken" class="form-control" rows="2" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Refresh Token (RT)</label>
+                    <input type="text" id="edit-team-refresh-token" name="refreshToken" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Session Token</label>
+                    <textarea id="edit-team-session-token" name="sessionToken" class="form-control" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <input type="text" id="edit-team-client-id" name="clientId" class="form-control">
                 </div>
                 <div class="form-group">
                     <label>Account ID <span class="required">*</span></label>
@@ -309,6 +321,9 @@
                 document.getElementById('edit-team-id').value = team.id;
                 document.getElementById('edit-team-email').value = team.email;
                 document.getElementById('edit-team-token').value = team.access_token || '';
+                document.getElementById('edit-team-refresh-token').value = team.refresh_token || '';
+                document.getElementById('edit-team-session-token').value = team.session_token || '';
+                document.getElementById('edit-team-client-id').value = team.client_id || '';
                 document.getElementById('edit-team-account-id').value = team.account_id || '';
                 document.getElementById('edit-team-max-members').value = team.max_members || 6;
                 document.getElementById('edit-team-status').value = team.status || 'active';
@@ -327,6 +342,9 @@
         const payload = {
             email: document.getElementById('edit-team-email').value,
             access_token: document.getElementById('edit-team-token').value,
+            refresh_token: document.getElementById('edit-team-refresh-token').value,
+            session_token: document.getElementById('edit-team-session-token').value,
+            client_id: document.getElementById('edit-team-client-id').value,
             account_id: document.getElementById('edit-team-account-id').value,
             max_members: parseInt(document.getElementById('edit-team-max-members').value),
             status: document.getElementById('edit-team-status').value

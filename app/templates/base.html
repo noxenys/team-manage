@@ -92,65 +92,78 @@
 
                 <div id="singleImport" class="import-panel">
                     <form id="singleImportForm" onsubmit="handleSingleImport(event)">
-                        <div class="form-group">
-                            <label>Access Token (AT) <span class="required">*</span></label>
-                            <textarea name="accessToken" class="form-control" rows="4"
-                                placeholder="eyJhbGciOiJSUzI1Ni..." required></textarea>
-                            <small class="form-text">必填项，以 eyJ 开头的 JWT Token</small>
-                        </div>
-                        <div class="form-group">
-                            <label>邮箱</label>
-                            <input type="email" name="email" class="form-control" placeholder="admin@example.com">
-                            <small class="form-text">可选，如果不填写将从 Token 中自动提取</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Account ID</label>
-                            <input type="text" name="accountId" class="form-control"
-                                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-                            <small class="form-text">可选，如果不填写将从 API 自动获取</small>
-                        </div>
-                        <button type="submit" class="btn btn-primary">导入</button>
-                    </form>
+                        <textarea name="accessToken" class="form-control" rows="2" placeholder="eyJhbGciOiJSUzI1Ni..."
+                            required></textarea>
+                        <small class="form-text">必填项，以 eyJ 开头的 JWT Token</small>
                 </div>
+                <div class="form-group">
+                    <label>Refresh Token (RT)</label>
+                    <input type="text" name="refreshToken" class="form-control" placeholder="rt-...">
+                    <small class="form-text">可选，用于自动刷新 AT</small>
+                </div>
+                <div class="form-group">
+                    <label>Session Token</label>
+                    <textarea name="sessionToken" class="form-control" rows="2" placeholder="eyJ..."></textarea>
+                    <small class="form-text">可选，作为备选刷新方式</small>
+                </div>
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <input type="text" name="clientId" class="form-control" placeholder="Client ID">
+                    <small class="form-text">使用 Refresh Token 时必填</small>
+                </div>
+                <div class="form-group">
+                    <label>邮箱</label>
+                    <input type="email" name="email" class="form-control" placeholder="admin@example.com">
+                    <small class="form-text">可选，如果不填写将从 Token 中自动提取</small>
+                </div>
+                <div class="form-group">
+                    <label>Account ID</label>
+                    <input type="text" name="accountId" class="form-control"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                    <small class="form-text">可选，如果不填写将从 API 自动获取</small>
+                </div>
+                <button type="submit" class="btn btn-primary">导入</button>
+                </form>
+            </div>
 
-                <div id="batchImport" class="import-panel" style="display: none;">
-                    <form id="batchImportForm" onsubmit="handleBatchImport(event)">
-                        <div class="form-group">
-                            <label>批量导入内容 <span class="required">*</span></label>
-                            <textarea name="batchContent" class="form-control" rows="8" placeholder="一行一个 AT Token..."
-                                required></textarea>
+            <div id="batchImport" class="import-panel" style="display: none;">
+                <form id="batchImportForm" onsubmit="handleBatchImport(event)">
+                    <div class="form-group">
+                        <label>批量导入内容 <span class="required">*</span></label>
+                        <textarea name="batchContent" class="form-control" rows="8" placeholder="一行一个 AT Token..."
+                            required></textarea>
+                    </div>
+                    <div id="batchProgressContainer" style="display: none; margin-bottom: 1.5rem;">
+                        <div class="progress-info"
+                            style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.875rem;">
+                            <span id="batchProgressStage">正在准备...</span>
+                            <span id="batchProgressPercent">0%</span>
                         </div>
-                        <div id="batchProgressContainer" style="display: none; margin-bottom: 1.5rem;">
-                            <div class="progress-info"
-                                style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.875rem;">
-                                <span id="batchProgressStage">正在准备...</span>
-                                <span id="batchProgressPercent">0%</span>
-                            </div>
-                            <div class="progress-bar-bg"
-                                style="width: 100%; height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden;">
-                                <div id="batchProgressBar"
-                                    style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.3s ease;">
-                                </div>
-                            </div>
-                            <div id="batchProgressStats"
-                                style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dim); display: flex; gap: 1rem;">
-                                <span>成功: <span id="batchSuccessCount" class="text-success">0</span></span>
-                                <span>失败: <span id="batchFailedCount" class="text-danger">0</span></span>
+                        <div class="progress-bar-bg"
+                            style="width: 100%; height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden;">
+                            <div id="batchProgressBar"
+                                style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width 0.3s ease;">
                             </div>
                         </div>
-                        <div id="batchResultsContainer" style="display: none; margin-bottom: 1rem;">
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                                <h4 style="margin: 0;">导入详情</h4>
-                                <small id="batchFinalSummary" class="text-muted"></small>
-                            </div>
-                            <div id="batchResults"></div>
+                        <div id="batchProgressStats"
+                            style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dim); display: flex; gap: 1rem;">
+                            <span>成功: <span id="batchSuccessCount" class="text-success">0</span></span>
+                            <span>失败: <span id="batchFailedCount" class="text-danger">0</span></span>
                         </div>
-                        <button type="submit" class="btn btn-primary">批量导入</button>
-                    </form>
-                </div>
+                    </div>
+                    <div id="batchResultsContainer" style="display: none; margin-bottom: 1rem;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h4 style="margin: 0;">导入详情</h4>
+                            <small id="batchFinalSummary" class="text-muted"></small>
+                        </div>
+                        <div id="batchResults"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">批量导入</button>
+                </form>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- 生成兑换码 模态框 -->

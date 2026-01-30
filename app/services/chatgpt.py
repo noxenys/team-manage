@@ -506,6 +506,105 @@ class ChatGPTService:
             "error": None
         }
 
+    async def refresh_access_token_with_session_token(
+        self,
+        session_token: str,
+        db_session: DBAsyncSession
+    ) -> Dict[str, Any]:
+        """
+        使用 session_token 刷新 access_token
+        
+        Args:
+            session_token: session_token
+            db_session: 数据库会话
+            
+        Returns:
+            结果字典,包含 success, access_token, error
+        """
+        url = "https://chatgpt.com/api/auth/session"
+        
+        headers = {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        cookies = {
+            "__Secure-next-auth.session-token": session_token
+        }
+        
+        logger.info("使用 session_token 刷新 access_token")
+        
+        if not self.session:
+            self.session = await self._create_session(db_session)
+            
+        try:
+            response = await self.session.get(url, headers=headers, cookies=cookies)
+            if response.status_code == 200:
+                data = response.json()
+                access_token = data.get("accessToken")
+                if access_token:
+                    return {
+                        "success": True,
+                        "access_token": access_token
+                    }
+                return {"success": False, "error": "响应中未包含 accessToken"}
+            else:
+                return {"success": False, "error": f"刷新失败, 状态码: {response.status_code}, 响应: {response.text}"}
+        except Exception as e:
+            logger.error(f"session_token 刷新失败: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def refresh_access_token_with_refresh_token(
+        self,
+        refresh_token: str,
+        client_id: str,
+        db_session: DBAsyncSession
+    ) -> Dict[str, Any]:
+        """
+        使用 refresh_token 刷新 access_token
+        
+        Args:
+            refresh_token: refresh_token
+            client_id: client_id
+            db_session: 数据库会话
+            
+        Returns:
+            结果字典,包含 success, access_token, refresh_token, error
+        """
+        url = "https://auth.openai.com/oauth/token"
+        
+        json_data = {
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "redirect_uri": "com.openai.sora://auth.openai.com/android/com.openai.sora/callback",
+            "refresh_token": refresh_token
+        }
+        
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        logger.info("使用 refresh_token 刷新 access_token")
+        
+        if not self.session:
+            self.session = await self._create_session(db_session)
+            
+        try:
+            response = await self.session.post(url, headers=headers, json=json_data)
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "success": True,
+                    "access_token": data.get("access_token"),
+                    "refresh_token": data.get("refresh_token")
+                }
+            else:
+                return {"success": False, "error": f"刷新失败, 状态码: {response.status_code}, 响应: {response.text}"}
+        except Exception as e:
+            logger.error(f"refresh_token 刷新失败: {e}")
+            return {"success": False, "error": str(e)}
+
     async def close(self):
         """关闭 HTTP 会话"""
         if self.session:

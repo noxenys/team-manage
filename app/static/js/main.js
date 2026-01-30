@@ -166,6 +166,9 @@ async function handleSingleImport(event) {
     event.preventDefault();
     const form = event.target;
     const accessToken = form.accessToken.value.trim();
+    const refreshToken = form.refreshToken ? form.refreshToken.value.trim() : null;
+    const sessionToken = form.sessionToken ? form.sessionToken.value.trim() : null;
+    const clientId = form.clientId ? form.clientId.value.trim() : null;
     const email = form.email.value.trim();
     const accountId = form.accountId.value.trim();
     const submitButton = form.querySelector('button[type="submit"]');
@@ -179,6 +182,9 @@ async function handleSingleImport(event) {
             body: JSON.stringify({
                 import_type: 'single',
                 access_token: accessToken,
+                refresh_token: refreshToken || null,
+                session_token: sessionToken || null,
+                client_id: clientId || null,
                 email: email || null,
                 account_id: accountId || null
             })

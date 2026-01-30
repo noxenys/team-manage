@@ -36,6 +36,9 @@ class TeamImportRequest(BaseModel):
     """Team 导入请求"""
     import_type: str = Field(..., description="导入类型: single 或 batch")
     access_token: Optional[str] = Field(None, description="AT Token (单个导入)")
+    refresh_token: Optional[str] = Field(None, description="Refresh Token (单个导入)")
+    session_token: Optional[str] = Field(None, description="Session Token (单个导入)")
+    client_id: Optional[str] = Field(None, description="Client ID (单个导入)")
     email: Optional[str] = Field(None, description="邮箱 (单个导入)")
     account_id: Optional[str] = Field(None, description="Account ID (单个导入)")
     content: Optional[str] = Field(None, description="批量导入内容")
@@ -60,6 +63,9 @@ class TeamUpdateRequest(BaseModel):
     email: Optional[str] = Field(None, description="新邮箱")
     account_id: Optional[str] = Field(None, description="新 Account ID")
     access_token: Optional[str] = Field(None, description="新 Access Token")
+    refresh_token: Optional[str] = Field(None, description="新 Refresh Token")
+    session_token: Optional[str] = Field(None, description="新 Session Token")
+    client_id: Optional[str] = Field(None, description="新 Client ID")
     max_members: Optional[int] = Field(None, description="最大成员数")
     status: Optional[str] = Field(None, description="状态: active/full/expired/error/banned")
 
@@ -204,15 +210,18 @@ async def update_team(
 ):
     """更新 Team 信息"""
     try:
-        result = await team_service.update_team(
-            team_id=team_id,
-            db_session=db,
-            email=update_data.email,
-            account_id=update_data.account_id,
-            access_token=update_data.access_token,
-            max_members=update_data.max_members,
-            status=update_data.status
-        )
+            result = await team_service.update_team(
+                team_id=team_id,
+                db_session=db,
+                email=update_data.email,
+                account_id=update_data.account_id,
+                access_token=update_data.access_token,
+                refresh_token=update_data.refresh_token,
+                session_token=update_data.session_token,
+                client_id=update_data.client_id,
+                max_members=update_data.max_members,
+                status=update_data.status
+            )
         if not result["success"]:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -263,7 +272,10 @@ async def team_import(
                 access_token=import_data.access_token,
                 db_session=db,
                 email=import_data.email,
-                account_id=import_data.account_id
+                account_id=import_data.account_id,
+                refresh_token=import_data.refresh_token,
+                session_token=import_data.session_token,
+                client_id=import_data.client_id
             )
 
             if not result["success"]:

@@ -67,6 +67,22 @@ def run_auto_migration():
                 ADD COLUMN is_warranty_redemption BOOLEAN DEFAULT 0
             """)
             migrations_applied.append("redemption_records.is_warranty_redemption")
+
+        # 检查并添加 Token 刷新相关字段
+        if not column_exists(cursor, "teams", "refresh_token_encrypted"):
+            logger.info("添加 teams.refresh_token_encrypted 字段")
+            cursor.execute("ALTER TABLE teams ADD COLUMN refresh_token_encrypted TEXT")
+            migrations_applied.append("teams.refresh_token_encrypted")
+
+        if not column_exists(cursor, "teams", "session_token_encrypted"):
+            logger.info("添加 teams.session_token_encrypted 字段")
+            cursor.execute("ALTER TABLE teams ADD COLUMN session_token_encrypted TEXT")
+            migrations_applied.append("teams.session_token_encrypted")
+
+        if not column_exists(cursor, "teams", "client_id"):
+            logger.info("添加 teams.client_id 字段")
+            cursor.execute("ALTER TABLE teams ADD COLUMN client_id VARCHAR(100)")
+            migrations_applied.append("teams.client_id")
         
         # 提交更改
         conn.commit()

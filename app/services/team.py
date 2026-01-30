@@ -51,18 +51,79 @@ class TeamService:
             
         return False
 
+    async def ensure_access_token(self, team: Team, db_session: AsyncSession) -> Optional[str]:
+        """
+        确保 AT Token 有效,如果过期则尝试刷新
+        
+        Args:
+            team: Team 对象
+            db_session: 数据库会话
+            
+        Returns:
+            有效的 AT Token, 刷新失败返回 None
+        """
+        try:
+            # 1. 解密当前 Token
+            access_token = encryption_service.decrypt_token(team.access_token_encrypted)
+            
+            # 2. 检查是否过期
+            if not self.jwt_parser.is_token_expired(access_token):
+                return access_token
+                
+            logger.info(f"Team {team.id} ({team.email}) Token 已过期, 尝试刷新")
+        except Exception as e:
+            logger.error(f"解密或验证 Token 失败: {e}")
+            access_token = None # 可能是解密失败，强制走刷新流程
+
+        # 3. 尝试使用 session_token 刷新
+        if team.session_token_encrypted:
+            session_token = encryption_service.decrypt_token(team.session_token_encrypted)
+            refresh_result = await self.chatgpt_service.refresh_access_token_with_session_token(
+                session_token, db_session
+            )
+            if refresh_result["success"]:
+                new_at = refresh_result["access_token"]
+                logger.info(f"Team {team.id} 通过 session_token 成功刷新 AT")
+                team.access_token_encrypted = encryption_service.encrypt_token(new_at)
+                await db_session.commit()
+                return new_at
+
+        # 4. 尝试使用 refresh_token 刷新
+        if team.refresh_token_encrypted and team.client_id:
+            refresh_token = encryption_service.decrypt_token(team.refresh_token_encrypted)
+            refresh_result = await self.chatgpt_service.refresh_access_token_with_refresh_token(
+                refresh_token, team.client_id, db_session
+            )
+            if refresh_result["success"]:
+                new_at = refresh_result["access_token"]
+                new_rt = refresh_result.get("refresh_token")
+                logger.info(f"Team {team.id} 通过 refresh_token 成功刷新 AT")
+                team.access_token_encrypted = encryption_service.encrypt_token(new_at)
+                if new_rt:
+                    team.refresh_token_encrypted = encryption_service.encrypt_token(new_rt)
+                await db_session.commit()
+                return new_at
+        
+        logger.warning(f"Team {team.id} Token 已过期且刷新失败")
+        team.status = "error"
+        await db_session.commit()
+        return None
+
     async def import_team_single(
         self,
-        access_token: str,
+        access_token: Optional[str],
         db_session: AsyncSession,
         email: Optional[str] = None,
-        account_id: Optional[str] = None
+        account_id: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        session_token: Optional[str] = None,
+        client_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         单个导入 Team
 
         Args:
-            access_token: AT Token
+            access_token: AT Token (可选,如果提供 RT/ST 可自动获取)
             db_session: 数据库会话
             email: 邮箱 (可选,如果不提供则从 Token 中提取)
             account_id: Account ID (可选,如果不提供则从 API 获取并导入所有活跃的)
@@ -71,7 +132,49 @@ class TeamService:
             结果字典,包含 success, team_id (第一个导入的), message, error
         """
         try:
-            # 1. 如果没有提供邮箱,从 Token 中提取
+            # 1. 检查并尝试刷新 Token (如果 AT 缺失或过期)
+            is_at_valid = False
+            if access_token:
+                try:
+                    if not self.jwt_parser.is_token_expired(access_token):
+                        is_at_valid = True
+                except:
+                    pass
+            
+            if not is_at_valid:
+                logger.info("导入时 AT 缺失或过期, 尝试使用 ST/RT 刷新")
+                # 尝试 session_token
+                if session_token:
+                    refresh_result = await self.chatgpt_service.refresh_access_token_with_session_token(
+                        session_token, db_session
+                    )
+                    if refresh_result["success"]:
+                        access_token = refresh_result["access_token"]
+                        is_at_valid = True
+                        logger.info("导入时通过 session_token 成功获取 AT")
+                
+                # 尝试 refresh_token
+                if not is_at_valid and refresh_token and client_id:
+                    refresh_result = await self.chatgpt_service.refresh_access_token_with_refresh_token(
+                        refresh_token, client_id, db_session
+                    )
+                    if refresh_result["success"]:
+                        access_token = refresh_result["access_token"]
+                        # RT 刷新可能会返回新的 RT
+                        if refresh_result.get("refresh_token"):
+                            refresh_token = refresh_result["refresh_token"]
+                        is_at_valid = True
+                        logger.info("导入时通过 refresh_token 成功获取 AT")
+
+            if not access_token or not is_at_valid:
+                return {
+                    "success": False,
+                    "team_id": None,
+                    "message": None,
+                    "error": "缺少有效的 Access Token，且无法通过 Session/Refresh Token 刷新"
+                }
+
+            # 2. 如果没有提供邮箱,从 Token 中提取
             if not email:
                 email = self.jwt_parser.extract_email(access_token)
                 if not email:
@@ -138,9 +241,8 @@ class TeamService:
             skipped_ids = []
             
             for selected_account in accounts_to_import:
-                # 检查是否已存在 (根据邮箱和 account_id)
+                # 检查是否已存在 (根据 account_id)
                 stmt = select(Team).where(
-                    Team.email == email,
                     Team.account_id == selected_account["account_id"]
                 )
                 result = await db_session.execute(stmt)
@@ -181,11 +283,16 @@ class TeamService:
 
                 # 加密 AT Token
                 encrypted_token = encryption_service.encrypt_token(access_token)
+                encrypted_rt = encryption_service.encrypt_token(refresh_token) if refresh_token else None
+                encrypted_st = encryption_service.encrypt_token(session_token) if session_token else None
 
                 # 创建 Team 记录
                 team = Team(
                     email=email,
                     access_token_encrypted=encrypted_token,
+                    refresh_token_encrypted=encrypted_rt,
+                    session_token_encrypted=encrypted_st,
+                    client_id=client_id,
                     encryption_key_id="default",
                     account_id=selected_account["account_id"],
                     team_name=selected_account["name"],
@@ -298,12 +405,20 @@ class TeamService:
 
             if access_token:
                 team.access_token_encrypted = encryption_service.encrypt_token(access_token)
+            if refresh_token:
+                team.refresh_token_encrypted = encryption_service.encrypt_token(refresh_token)
+            if session_token:
+                team.session_token_encrypted = encryption_service.encrypt_token(session_token)
+            if client_id:
+                team.client_id = client_id
             if email:
                 team.email = email
             if account_id:
                 team.account_id = account_id
             if max_members is not None:
                 team.max_members = max_members
+            if status:
+                team.status = status
 
             # 更新状态
             if team.current_members >= team.max_members:
@@ -345,6 +460,9 @@ class TeamService:
                     "account_id": team.account_id,
                     "max_members": team.max_members,
                     "access_token": access_token,
+                    "refresh_token": encryption_service.decrypt_token(team.refresh_token_encrypted) if team.refresh_token_encrypted else "",
+                    "session_token": encryption_service.decrypt_token(team.session_token_encrypted) if team.session_token_encrypted else "",
+                    "client_id": team.client_id or "",
                     "team_name": team.team_name,
                     "status": team.status
                 }
@@ -391,10 +509,13 @@ class TeamService:
 
             for i, data in enumerate(parsed_data):
                 result = await self.import_team_single(
-                    access_token=data["token"],
+                    access_token=data.get("token"),
                     db_session=db_session,
                     email=data.get("email"),
-                    account_id=data.get("account_id")
+                    account_id=data.get("account_id"),
+                    refresh_token=data.get("refresh_token"),
+                    session_token=data.get("session_token"),
+                    client_id=data.get("client_id")
                 )
 
                 if result["success"]:
@@ -462,18 +583,13 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
-            # 2. 解密 AT Token
-            try:
-                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
-            except Exception as e:
-                logger.error(f"解密 Token 失败: {e}")
-                # 更新状态为 error
-                team.status = "error"
-                await db_session.commit()
+            # 2. 确保 AT Token 有效
+            access_token = await self.ensure_access_token(team, db_session)
+            if not access_token:
                 return {
                     "success": False,
                     "message": None,
-                    "error": f"解密 Token 失败: {str(e)}"
+                    "error": "Token 已过期且无法刷新"
                 }
 
             # 3. 获取账户信息
@@ -692,16 +808,14 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
-            # 2. 解密 AT Token
-            try:
-                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
-            except Exception as e:
-                logger.error(f"解密 Token 失败: {e}")
+            # 2. 确保 AT Token 有效
+            access_token = await self.ensure_access_token(team, db_session)
+            if not access_token:
                 return {
                     "success": False,
                     "members": [],
                     "total": 0,
-                    "error": f"解密 Token 失败: {str(e)}"
+                    "error": "Token 已过期且无法刷新"
                 }
 
             # 3. 调用 ChatGPT API 获取成员列表
@@ -800,15 +914,13 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
-            # 2. 解密 AT Token
-            try:
-                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
-            except Exception as e:
-                logger.error(f"解密 Token 失败: {e}")
+            # 2. 确保 AT Token 有效
+            access_token = await self.ensure_access_token(team, db_session)
+            if not access_token:
                 return {
                     "success": False,
                     "message": None,
-                    "error": f"解密 Token 失败: {str(e)}"
+                    "error": "Token 已过期且无法刷新"
                 }
 
             # 3. 调用 ChatGPT API 撤回邀请
@@ -912,15 +1024,13 @@ class TeamService:
                     "error": "Team 已过期,无法添加成员"
                 }
 
-            # 3. 解密 AT Token
-            try:
-                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
-            except Exception as e:
-                logger.error(f"解密 Token 失败: {e}")
+            # 3. 确保 AT Token 有效
+            access_token = await self.ensure_access_token(team, db_session)
+            if not access_token:
                 return {
                     "success": False,
                     "message": None,
-                    "error": f"解密 Token 失败: {str(e)}"
+                    "error": "Token 已过期且无法刷新"
                 }
 
             # 4. 调用 ChatGPT API 发送邀请
@@ -1006,15 +1116,13 @@ class TeamService:
                     "error": f"Team ID {team_id} 不存在"
                 }
 
-            # 2. 解密 AT Token
-            try:
-                access_token = encryption_service.decrypt_token(team.access_token_encrypted)
-            except Exception as e:
-                logger.error(f"解密 Token 失败: {e}")
+            # 2. 确保 AT Token 有效
+            access_token = await self.ensure_access_token(team, db_session)
+            if not access_token:
                 return {
                     "success": False,
                     "message": None,
-                    "error": f"解密 Token 失败: {str(e)}"
+                    "error": "Token 已过期且无法刷新"
                 }
 
             # 3. 调用 ChatGPT API 删除成员
@@ -1341,6 +1449,9 @@ class TeamService:
         email: Optional[str] = None,
         account_id: Optional[str] = None,
         access_token: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        session_token: Optional[str] = None,
+        client_id: Optional[str] = None,
         max_members: Optional[int] = None,
         status: Optional[str] = None
     ) -> Dict[str, Any]:
