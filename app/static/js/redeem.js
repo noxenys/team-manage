@@ -429,6 +429,13 @@ function showWarrantyResult(data) {
                                     </div>
                                     ` : ''}
                                 </div>
+                                ${(data.can_reuse && (record.team_status === 'banned' || record.team_status === 'error')) ? `
+                                <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.05); text-align: right;">
+                                    <button onclick="oneClickReplace('${escapeHtml(data.original_code)}', '${escapeHtml(record.email || currentEmail)}')" class="btn btn-sm btn-primary">
+                                        <i data-lucide="refresh-cw" style="width: 14px; height: 14px; margin-right: 4px;"></i> 一键换车
+                                    </button>
+                                </div>
+                                ` : ''}
                             </div>
                         `;
         }).join('')}
@@ -449,7 +456,7 @@ function showWarrantyResult(data) {
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <input type="text" value="${escapeHtml(data.original_code)}" readonly 
                         style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-base); border-radius: 8px; color: var(--text-primary); font-family: monospace; font-size: 1.1rem;">
-                    <button onclick="copyWarrantyCode('${escapeHtml(data.original_code)}')" class="btn btn-primary" style="white-space: nowrap;">
+                    <button onclick="copyWarrantyCode('${escapeHtml(data.original_code)}')" class="btn btn-secondary" style="white-space: nowrap;">
                         <i data-lucide="copy"></i> 复制
                     </button>
                 </div>
@@ -484,4 +491,47 @@ function copyWarrantyCode(code) {
     }).catch(() => {
         showToast('复制失败，请手动复制', 'error');
     });
+}
+
+// 一键换车
+async function oneClickReplace(code, email) {
+    if (!code || !email) {
+        showToast('无法获取完整信息，请手动重试', 'error');
+        return;
+    }
+
+    // 更新全局变量
+    currentEmail = email;
+    currentCode = code;
+
+    // 填充Step1表单 (以便如果失败返回可以看到)
+    const emailInput = document.getElementById('email');
+    const codeInput = document.getElementById('code');
+    if (emailInput) emailInput.value = email;
+    if (codeInput) codeInput.value = code;
+
+    const btn = event.currentTarget;
+    const originalContent = btn.innerHTML;
+
+    // 禁用所有按钮防止重复提交
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader" class="spinning"></i> 处理中...';
+    if (window.lucide) lucide.createIcons();
+
+    showToast('正在为您尝试自动兑换...', 'info');
+
+    try {
+        // 直接调用confirmRedeem，传入null表示自动选择Team
+        await confirmRedeem(null);
+    } catch (e) {
+        console.error(e);
+        showToast('一键换车请求失败', 'error');
+    } finally {
+        // 如果页面未跳转（失败情况），恢复按钮
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            if (window.lucide) lucide.createIcons();
+        }
+    }
 }

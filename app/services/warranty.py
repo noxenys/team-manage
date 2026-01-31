@@ -76,7 +76,11 @@ class WarrantyService:
                     .order_by(RedemptionRecord.redeemed_at.desc())
                 )
                 result = await db_session.execute(stmt)
-                records_data = result.all()
+                first_record = result.first()
+                if first_record:
+                    records_data = [first_record]
+                else:
+                    records_data = []
 
                 # 如果没有记录，可能是码还没被使用或不存在
                 if not records_data:
@@ -193,6 +197,7 @@ class WarrantyService:
                     "team_id": team.id,
                     "team_name": team.team_name,
                     "team_status": team.status,
+                    "email": record.email
                 })
 
             # 3. 判断是否可以重复使用 (只要有有效的质保码且有被封的 Team)
