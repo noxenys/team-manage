@@ -243,14 +243,14 @@ class TeamService:
 
             # 3. 确定要导入的账户列表
             if account_id:
-                # 优先从 API 结果中查找指定的 account_id 以获取真实元数据
+                # 3.1 优先处理指定的 account_id 以获取其元数据
                 found_account = next((acc for acc in team_accounts if acc["account_id"] == account_id), None)
                 
                 if found_account:
                     accounts_to_import.append(found_account)
                     logger.info(f"导入时找到指定的 account_id: {account_id}, 已获取真实元数据")
                 else:
-                    # 如果未找到或 API 失败，保底使用占位符 (旧逻辑)
+                    # 如果未找到或 API 失败，保底使用占位符
                     placeholder = {
                         "account_id": account_id,
                         "name": f"Team-{account_id[:8]}",
@@ -260,12 +260,19 @@ class TeamService:
                         "has_active_subscription": True
                     }
                     accounts_to_import.append(placeholder)
-                    # 如果 team_accounts 为空，也把占位符加进去，保证后续 TeamAccount 记录创建
                     if not team_accounts:
                         team_accounts.append(placeholder)
                     logger.info(f"导入时未找到指定的 account_id: {account_id}, 使用占位符元数据")
-            else:
-                # 如果没有指定 account_id，必须要求 API 调用成功
+            
+            # 3.2 自动导入 API 返回的所有其他活跃账号 (多账号支持)
+            for acc in team_accounts:
+                if acc["has_active_subscription"]:
+                    # 避免与指定的 account_id 重复
+                    if not any(a["account_id"] == acc["account_id"] for a in accounts_to_import):
+                        accounts_to_import.append(acc)
+
+            # 3.3 如果此时依然没有任何账号可导入 (且没有指定 account_id)
+            if not accounts_to_import and not account_id:
                 if not account_result["success"]:
                     return {
                         "success": False,
@@ -281,15 +288,9 @@ class TeamService:
                         "message": None,
                         "error": "该 Token 没有关联任何 Team 账户"
                     }
-
-                # 4. 自动选择活跃的账户
-                for acc in team_accounts:
-                    if acc["has_active_subscription"]:
-                        accounts_to_import.append(acc)
                 
-                # 如果一个活跃的都没找到，保底使用第一个
-                if not accounts_to_import:
-                    accounts_to_import.append(team_accounts[0])
+                # 保底使用第一个
+                accounts_to_import.append(team_accounts[0])
 
             # 4. 循环处理这些账户
             imported_ids = []
