@@ -344,7 +344,8 @@ class TeamService:
 
                 # 确定状态
                 status = "active"
-                if current_members >= 6:
+                max_members = team.max_members if 'team' in locals() and team else 6
+                if current_members >= max_members:
                     status = "full"
                 elif expires_at and expires_at < datetime.now():
                     status = "expired"
@@ -368,7 +369,7 @@ class TeamService:
                     subscription_plan=selected_account["subscription_plan"],
                     expires_at=expires_at,
                     current_members=current_members,
-                    max_members=6,
+                    max_members=max_members,
                     status=status,
                     last_sync=get_now()
                 )
@@ -789,11 +790,11 @@ class TeamService:
                 current_members += invites_result["total"]
             else:
                 # 检查是否封号或 Token 失效
-                if await self._handle_api_error(members_result, team, db_session):
-                    error_msg = members_result.get("error", "未知错误")
-                    if members_result.get("error_code") == "account_deactivated":
+                if await self._handle_api_error(invites_result, team, db_session):
+                    error_msg = invites_result.get("error", "未知错误")
+                    if invites_result.get("error_code") == "account_deactivated":
                         error_msg = "账号已封禁 (account_deactivated)"
-                    elif members_result.get("error_code") == "token_invalidated":
+                    elif invites_result.get("error_code") == "token_invalidated":
                         error_msg = "账号已封禁/失效 (token_invalidated)"
                         
                     return {

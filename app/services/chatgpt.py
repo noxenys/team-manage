@@ -361,7 +361,7 @@ class ChatGPTService:
 
         data = result["data"]
         items = data.get("items", [])
-        total = data.get("total", 0)
+        total = data.get("total", len(items))
 
         return {
             "success": True,

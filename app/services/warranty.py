@@ -302,37 +302,46 @@ class WarrantyService:
                         "error": None
                     }
 
-            # 4. 检查该兑换码是否已被其他邮箱绑定
-            stmt = select(RedemptionRecord).where(
-                RedemptionRecord.code == code
-            ).order_by(RedemptionRecord.redeemed_at.asc()).limit(1)
+            # 4. 检查该兑换码当前是否已有正在使用的活跃 Team (全局检查，不限邮箱)
+            # 逻辑：如果该码名下有任何一个 Team 还是 active/full 状态且未过期，则不允许新的激活
+            stmt = select(RedemptionRecord).where(RedemptionRecord.code == code)
             result = await db_session.execute(stmt)
-            first_record = result.scalar_one_or_none()
+            all_records_for_code = result.scalars().all()
             
-            if first_record and first_record.email != email:
-                return {
-                    "success": True,
-                    "can_reuse": False,
-                    "reason": f"该兑换码已由其他邮箱 ({first_record.email}) 绑定，不可跨账号使用",
-                    "error": None
-                }
+            for record in all_records_for_code:
+                stmt = select(Team).where(Team.id == record.team_id)
+                result = await db_session.execute(stmt)
+                team = result.scalar_one_or_none()
+                
+                if team:
+                    is_expired = team.expires_at and team.expires_at < get_now()
+                    if team.status in ["active", "full"] and not is_expired:
+                        # 如果是同一个邮箱，提示已在有效 Team 中
+                        if record.email == email:
+                            return {
+                                "success": True,
+                                "can_reuse": False,
+                                "reason": f"您已在有效 Team 中 ({team.team_name or team.id})，不可重复兑换",
+                                "error": None
+                            }
+                        else:
+                            # 如果是不同邮箱，提示已被占用
+                            return {
+                                "success": True,
+                                "can_reuse": False,
+                                "reason": "该兑换码当前已被其他账号绑定且正在使用中。如需更换，请确保原账号已下车或原 Team 已失效。",
+                                "error": None
+                            }
 
-            # 5. 查找该用户使用该兑换码的所有记录
-            stmt = select(RedemptionRecord).where(
-                and_(
-                    RedemptionRecord.code == code,
-                    RedemptionRecord.email == email
-                )
-            ).order_by(RedemptionRecord.redeemed_at.desc())
-            result = await db_session.execute(stmt)
-            records = result.scalars().all()
+            # 5. 查找当前用户使用该兑换码的记录 (用于后续逻辑判断)
+            records = [r for r in all_records_for_code if r.email == email]
             
             if not records:
-                # 首次使用，允许
+                # 之前没有该邮箱的记录，但上面已经检查过没有其他活跃 Team 了，所以允许“新开”或“接手”
                 return {
                     "success": True,
                     "can_reuse": True,
-                    "reason": "首次使用",
+                    "reason": "可更名使用 (或首次使用)",
                     "error": None
                 }
 
