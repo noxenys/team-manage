@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}审计日志 - GPT Team 管理系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2>审计日志</h2>
+</div>
+
+<div class="content-section">
+    <div class="section-header">
+        <h3><i data-lucide="search"></i> 筛选</h3>
+    </div>
+    <form method="get" action="/admin/audit-logs" class="search-form-grid">
+        <div class="form-group">
+            <label for="actor">操作人</label>
+            <input type="text" id="actor" name="actor" value="{{ filters.actor or '' }}" class="form-control">
+        </div>
+        <div class="form-group">
+            <label for="action">动作</label>
+            <input type="text" id="action" name="action" value="{{ filters.action or '' }}" class="form-control">
+        </div>
+        <div class="form-group">
+            <label for="target_type">目标类型</label>
+            <input type="text" id="target_type" name="target_type" value="{{ filters.target_type or '' }}" class="form-control">
+        </div>
+        <div class="form-actions" style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary">筛选</button>
+            <a href="/admin/audit-logs" class="btn btn-secondary">重置</a>
+        </div>
+    </form>
+</div>
+
+<div class="content-section">
+    <div class="section-header">
+        <div style="display:flex; align-items:center; gap:1rem;">
+            <h3>日志列表</h3>
+            <span class="badge badge-info">{{ pagination.total }} 条</span>
+        </div>
+    </div>
+
+    {% if logs %}
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>操作人</th>
+                    <th>动作</th>
+                    <th>目标类型</th>
+                    <th>目标ID</th>
+                    <th>描述</th>
+                    <th>IP</th>
+                    <th>时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in logs %}
+                <tr>
+                    <td><span class="text-muted">{{ log.id }}</span></td>
+                    <td>{{ log.actor or '-' }}</td>
+                    <td>{{ log.action }}</td>
+                    <td>{{ log.target_type or '-' }}</td>
+                    <td>{{ log.target_id or '-' }}</td>
+                    <td>{{ log.message or '-' }}</td>
+                    <td>{{ log.ip or '-' }}</td>
+                    <td>{{ log.created_at|format_datetime }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if pagination and pagination.total_pages > 1 %}
+    <div class="pagination">
+        {% set actor_param = '&actor=' + filters.actor if filters.actor else '' %}
+        {% set action_param = '&action=' + filters.action if filters.action else '' %}
+        {% set target_param = '&target_type=' + filters.target_type if filters.target_type else '' %}
+        {% set filter_params = actor_param + action_param + target_param %}
+
+        {% if pagination.current_page > 1 %}
+        <a href="?page=1{{ filter_params }}" class="btn btn-sm btn-secondary">首页</a>
+        <a href="?page={{ pagination.current_page - 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
+            <i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i>
+        </a>
+        {% endif %}
+
+        <span class="pagination-info">第 {{ pagination.current_page }} / {{ pagination.total_pages }} 页</span>
+
+        {% if pagination.current_page < pagination.total_pages %}
+        <a href="?page={{ pagination.current_page + 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
+            <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
+        </a>
+        <a href="?page={{ pagination.total_pages }}{{ filter_params }}" class="btn btn-sm btn-secondary">末页</a>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">
+        <p>暂无日志</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

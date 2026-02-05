@@ -18,15 +18,15 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     app_host: str = "0.0.0.0"
     app_port: int = 8008
-    debug: bool = True
+    debug: bool = False
 
     # 数据库配置
     # 建议在 Docker 中使用 data 目录挂载，以避免文件挂载权限或类型问题
     database_url: str = f"sqlite+aiosqlite:///{BASE_DIR}/data/team_manage.db"
 
     # 安全配置
-    secret_key: str = "your-secret-key-here-change-in-production"
-    admin_password: str = "admin123"
+    secret_key: str = "change-me-strong-secret"
+    admin_password: str = "change-me"
 
     # 日志配置
     log_level: str = "INFO"
@@ -37,6 +37,12 @@ class Settings(BaseSettings):
 
     # JWT 配置
     jwt_verify_signature: bool = False
+
+    # ????
+    sync_enabled: bool = True
+    sync_interval_minutes: int = 60
+    sync_retry_count: int = 1
+    sync_retry_delay_seconds: int = 5
 
     # 时区配置
     timezone: str = "Asia/Shanghai"

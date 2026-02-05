@@ -398,7 +398,10 @@ class RedemptionService:
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 50,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        expires_before: Optional[datetime] = None,
+        expires_after: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         获取所有兑换码
@@ -425,6 +428,18 @@ class RedemptionService:
                 )
                 count_stmt = count_stmt.where(search_filter)
                 stmt = stmt.where(search_filter)
+
+            if status and status != "all":
+                count_stmt = count_stmt.where(RedemptionCode.status == status)
+                stmt = stmt.where(RedemptionCode.status == status)
+
+            if expires_before:
+                count_stmt = count_stmt.where(RedemptionCode.expires_at.is_not(None), RedemptionCode.expires_at <= expires_before)
+                stmt = stmt.where(RedemptionCode.expires_at.is_not(None), RedemptionCode.expires_at <= expires_before)
+
+            if expires_after:
+                count_stmt = count_stmt.where(RedemptionCode.expires_at.is_not(None), RedemptionCode.expires_at >= expires_after)
+                stmt = stmt.where(RedemptionCode.expires_at.is_not(None), RedemptionCode.expires_at >= expires_after)
 
             # 3. 获取总数
             count_result = await db_session.execute(count_stmt)
@@ -587,7 +602,9 @@ class RedemptionService:
         db_session: AsyncSession,
         email: Optional[str] = None,
         code: Optional[str] = None,
-        team_id: Optional[int] = None
+        team_id: Optional[int] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """
         获取所有兑换记录 (支持筛选)
@@ -612,6 +629,11 @@ class RedemptionService:
                 filters.append(RedemptionRecord.code.ilike(f"%{code}%"))
             if team_id:
                 filters.append(RedemptionRecord.team_id == team_id)
+
+            if start_date:
+                filters.append(RedemptionRecord.redeemed_at >= start_date)
+            if end_date:
+                filters.append(RedemptionRecord.redeemed_at <= end_date)
                 
             if filters:
                 stmt = stmt.where(and_(*filters))

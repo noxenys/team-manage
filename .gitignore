@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -57,13 +57,15 @@ nul
 # Environment variables
 .env
 .env.*
+
+# Local docs
 接口.md
 任务.md
 需求.md
-.gitignore
 CLAUDE.md
 openai-api.md
-.gitignore
+DATABASE_MIGRATION.md
+
+# SQLite temp files
 team_manage.db-shm
 team_manage.db-wal
-DATABASE_MIGRATION.md

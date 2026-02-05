@@ -142,7 +142,7 @@ class AuthService:
             # 从配置读取密码
             admin_password = settings.admin_password
 
-            if not admin_password or admin_password == "admin123":
+            if not admin_password or admin_password in {"admin123", "change-me", "CHANGE_ME"}:
                 logger.warning("使用默认密码，建议修改！")
 
             # 哈希密码

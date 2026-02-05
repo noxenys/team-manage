@@ -109,6 +109,25 @@ class RedemptionRecord(Base):
     )
 
 
+class AuditLog(Base):
+    """?????"""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    actor = Column(String(100), comment="???")
+    action = Column(String(100), nullable=False, comment="????")
+    target_type = Column(String(50), comment="????")
+    target_id = Column(String(100), comment="??ID")
+    message = Column(Text, comment="????")
+    ip = Column(String(64), comment="IP??")
+    created_at = Column(DateTime, default=get_now, comment="????")
+
+    __table_args__ = (
+        Index("idx_audit_created", "created_at"),
+        Index("idx_audit_action", "action"),
+    )
+
+
 class Setting(Base):
     """系统设置表"""
     __tablename__ = "settings"

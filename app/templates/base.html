@@ -57,6 +57,12 @@
                         <span class="menu-text">使用记录</span>
                     </a>
                 </li>
+                <li class="menu-item {% if active_page == 'audit_logs' %}active{% endif %}">
+                    <a href="/admin/audit-logs">
+                        <span class="menu-icon" data-lucide="clipboard-list"></span>
+                        <span class="menu-text">审计日志</span>
+                    </a>
+                </li>
                 <li class="menu-item {% if active_page == 'settings' %}active{% endif %}">
                     <a href="/admin/settings">
                         <span class="menu-icon" data-lucide="settings"></span>

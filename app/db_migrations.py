@@ -17,6 +17,12 @@ def get_db_path():
     return Path(db_file)
 
 
+def table_exists(cursor, table_name):
+    """Check if table exists"""
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    return cursor.fetchone() is not None
+
+
 def column_exists(cursor, table_name, column_name):
     """检查表中是否存在指定列"""
     cursor.execute(f"PRAGMA table_info({table_name})")
@@ -91,6 +97,24 @@ def run_auto_migration():
             logger.info("添加 teams.client_id 字段")
             cursor.execute("ALTER TABLE teams ADD COLUMN client_id VARCHAR(100)")
             migrations_applied.append("teams.client_id")
+
+        if not table_exists(cursor, "audit_logs"):
+            logger.info("Create audit_logs table")
+            cursor.execute("""
+                CREATE TABLE audit_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor VARCHAR(100),
+                    action VARCHAR(100) NOT NULL,
+                    target_type VARCHAR(50),
+                    target_id VARCHAR(100),
+                    message TEXT,
+                    ip VARCHAR(64),
+                    created_at DATETIME
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs (created_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action)")
+            migrations_applied.append("audit_logs")
 
         if not column_exists(cursor, "teams", "error_count"):
             logger.info("添加 teams.error_count 字段")

@@ -7,6 +7,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 import json
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ from app.database import get_db
 from app.dependencies.auth import require_admin
 from app.services.team import TeamService
 from app.services.redemption import RedemptionService
+from app.services.audit import audit_service
 from app.utils.time_utils import get_now
 
 logger = logging.getLogger(__name__)
@@ -25,10 +27,20 @@ router = APIRouter(
 )
 
 import json
+from datetime import datetime
 
 # 服务实例
 team_service = TeamService()
 redemption_service = RedemptionService()
+
+
+def _get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for") if request else None
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request and request.client:
+        return request.client.host
+    return ""
 
 
 # 请求模型
@@ -89,6 +101,10 @@ async def admin_dashboard(
     request: Request,
     page: int = 1,
     search: Optional[str] = None,
+    status: Optional[str] = None,
+    expires_before: Optional[str] = None,
+    expires_after: Optional[str] = None,
+    error_count_min: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -101,9 +117,30 @@ async def admin_dashboard(
 
         # 设置每页数量
         per_page = 20
+
+        def _parse_date(value: Optional[str]):
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+
+        parsed_before = _parse_date(expires_before)
+        parsed_after = _parse_date(expires_after)
+
         
         # 获取 Team 列表 (分页)
-        teams_result = await team_service.get_all_teams(db, page=page, per_page=per_page, search=search)
+        teams_result = await team_service.get_all_teams(
+            db,
+            page=page,
+            per_page=per_page,
+            search=search,
+            status=status,
+            expires_before=parsed_before,
+            expires_after=parsed_after,
+            error_count_min=error_count_min
+        )
         
         # 获取统计信息 (可以使用专用统计方法优化)
         all_teams_result = await team_service.get_all_teams(db, page=1, per_page=10000)
@@ -129,6 +166,12 @@ async def admin_dashboard(
                 "teams": teams_result.get("teams", []),
                 "stats": stats,
                 "search": search,
+                "filters": {
+                    "status": status,
+                    "expires_before": expires_before,
+                    "expires_after": expires_after,
+                    "error_count_min": error_count_min
+                },
                 "pagination": {
                     "current_page": teams_result.get("current_page", page),
                     "total_pages": teams_result.get("total_pages", 1),
@@ -150,6 +193,7 @@ async def admin_dashboard(
 @router.post("/teams/{team_id}/delete")
 async def delete_team(
     team_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -174,6 +218,16 @@ async def delete_team(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=result
             )
+
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "delete_team",
+            "team",
+            str(team_id),
+            f"Deleted team {team_id}",
+            _get_client_ip(request)
+        )
 
         return JSONResponse(content=result)
 
@@ -214,6 +268,7 @@ async def get_team_info(
 async def update_team(
     team_id: int,
     update_data: TeamUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -237,6 +292,16 @@ async def update_team(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=result
             )
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "update_team",
+            "team",
+            str(team_id),
+            f"Updated team {team_id}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(
@@ -250,6 +315,7 @@ async def update_team(
 @router.post("/teams/import")
 async def team_import(
     import_data: TeamImportRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -294,10 +360,30 @@ async def team_import(
                     content=result
                 )
 
+            await audit_service.log_action(
+                db,
+                current_user.get("username", "admin"),
+                "import_team_single",
+                "team",
+                str(result.get("team_id") or ""),
+                f"Imported team (single) {result.get('team_id')}",
+                _get_client_ip(request)
+            )
+
             return JSONResponse(content=result)
 
         elif import_data.import_type == "batch":
             # 批量导入使用 StreamingResponse
+            await audit_service.log_action(
+                db,
+                current_user.get("username", "admin"),
+                "import_team_batch",
+                "team",
+                None,
+                "Started batch import",
+                _get_client_ip(request)
+            )
+
             async def progress_generator():
                 async for status_item in team_service.import_team_batch(
                     text=import_data.content,
@@ -369,6 +455,7 @@ async def team_members_list(
 async def add_team_member(
     team_id: int,
     member_data: AddMemberRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -399,6 +486,16 @@ async def add_team_member(
                 content=result
             )
 
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "add_team_member",
+            "team",
+            str(team_id),
+            f"Add member {member_data.email} to team {team_id}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
 
     except Exception as e:
@@ -416,6 +513,7 @@ async def add_team_member(
 async def delete_team_member(
     team_id: int,
     user_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -446,6 +544,16 @@ async def delete_team_member(
                 content=result
             )
 
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "delete_team_member",
+            "team",
+            str(team_id),
+            f"Delete member {user_id} from team {team_id}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
 
     except Exception as e:
@@ -463,6 +571,7 @@ async def delete_team_member(
 async def revoke_team_invite(
     team_id: int,
     member_data: AddMemberRequest, # 使用相同的包含 email 的模型
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -493,6 +602,26 @@ async def revoke_team_invite(
                 content=result
             )
 
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "revoke_team_invite",
+            "team",
+            str(team_id),
+            f"Revoke invite {member_data.email} for team {team_id}",
+            _get_client_ip(request)
+        )
+
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "revoke_team_invite",
+            "team",
+            str(team_id),
+            f"Revoke invite {member_data.email} for team {team_id}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
 
     except Exception as e:
@@ -513,6 +642,9 @@ async def codes_list_page(
     request: Request,
     page: int = 1,
     search: Optional[str] = None,
+    status: Optional[str] = None,
+    expires_before: Optional[str] = None,
+    expires_after: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -535,8 +667,27 @@ async def codes_list_page(
         logger.info(f"管理员访问兑换码列表页面, search={search}")
 
         # 获取兑换码 (分页)
+        def _parse_date(value: Optional[str]):
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+
+        parsed_before = _parse_date(expires_before)
+        parsed_after = _parse_date(expires_after)
+
         per_page = 50
-        codes_result = await redemption_service.get_all_codes(db, page=page, per_page=per_page, search=search)
+        codes_result = await redemption_service.get_all_codes(
+            db,
+            page=page,
+            per_page=per_page,
+            search=search,
+            status=status,
+            expires_before=parsed_before,
+            expires_after=parsed_after
+        )
         codes = codes_result.get("codes", [])
         total_codes = codes_result.get("total", 0)
         total_pages = codes_result.get("total_pages", 1)
@@ -577,6 +728,11 @@ async def codes_list_page(
                 "codes": codes,
                 "stats": stats,
                 "search": search,
+                "filters": {
+                    "status": status,
+                    "expires_before": expires_before,
+                    "expires_after": expires_after
+                },
                 "pagination": {
                     "current_page": current_page,
                     "total_pages": total_pages,
@@ -599,6 +755,7 @@ async def codes_list_page(
 @router.post("/codes/generate")
 async def generate_codes(
     generate_data: CodeGenerateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -632,6 +789,16 @@ async def generate_codes(
                     content=result
                 )
 
+            await audit_service.log_action(
+                db,
+                current_user.get("username", "admin"),
+                "generate_code_single",
+                "code",
+                str(result.get("code") or ""),
+                f"Generated code {result.get('code')}",
+                _get_client_ip(request)
+            )
+
             return JSONResponse(content=result)
 
         elif generate_data.type == "batch":
@@ -659,6 +826,16 @@ async def generate_codes(
                     content=result
                 )
 
+            await audit_service.log_action(
+                db,
+                current_user.get("username", "admin"),
+                "generate_code_batch",
+                "code",
+                None,
+                f"Generated {result.get('total')} codes",
+                _get_client_ip(request)
+            )
+
             return JSONResponse(content=result)
 
         else:
@@ -684,6 +861,7 @@ async def generate_codes(
 @router.post("/codes/{code}/delete")
 async def delete_code(
     code: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -709,6 +887,16 @@ async def delete_code(
                 content=result
             )
 
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "delete_code",
+            "code",
+            code,
+            f"Deleted code {code}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
 
     except Exception as e:
@@ -725,6 +913,10 @@ async def delete_code(
 @router.get("/codes/export")
 async def export_codes(
     search: Optional[str] = None,
+    status: Optional[str] = None,
+    expires_before: Optional[str] = None,
+    expires_after: Optional[str] = None,
+    request: Request = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -748,7 +940,27 @@ async def export_codes(
         logger.info("管理员导出兑换码为Excel")
 
         # 获取所有兑换码 (导出不分页，传入大数量)
-        codes_result = await redemption_service.get_all_codes(db, page=1, per_page=100000, search=search)
+        def _parse_date(value: Optional[str]):
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+
+        parsed_before = _parse_date(expires_before)
+        parsed_after = _parse_date(expires_after)
+
+        # ??????? (???????????)
+        codes_result = await redemption_service.get_all_codes(
+            db,
+            page=1,
+            per_page=100000,
+            search=search,
+            status=status,
+            expires_before=parsed_before,
+            expires_after=parsed_after
+        )
         all_codes = codes_result.get("codes", [])
         
         # 结果可能带统计信息，我们只取 codes
@@ -832,9 +1044,235 @@ async def export_codes(
 
 
 @router.post("/codes/{code}/update")
+
+@router.get("/teams/export")
+async def export_teams(
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    expires_before: Optional[str] = None,
+    expires_after: Optional[str] = None,
+    error_count_min: Optional[int] = None,
+    format: Optional[str] = "xlsx",
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """?? Team ??"""
+    try:
+        from fastapi.responses import Response
+        from io import BytesIO, StringIO
+        import csv
+        import xlsxwriter
+
+        def _parse_date(value: Optional[str]):
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except Exception:
+                return None
+
+        parsed_before = _parse_date(expires_before)
+        parsed_after = _parse_date(expires_after)
+
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "export_teams",
+            "team",
+            None,
+            "Exported teams",
+            _get_client_ip(request)
+        )
+
+        teams_result = await team_service.get_all_teams(
+            db,
+            page=1,
+            per_page=100000,
+            search=search,
+            status=status,
+            expires_before=parsed_before,
+            expires_after=parsed_after,
+            error_count_min=error_count_min
+        )
+        teams = teams_result.get("teams", [])
+
+        if format == "csv":
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["ID", "Email", "Account ID", "Team Name", "Status", "Current Members", "Max Members", "Expires At", "Last Sync", "Error Count"] )
+            for t in teams:
+                writer.writerow([
+                    t.get("id"),
+                    t.get("email"),
+                    t.get("account_id"),
+                    t.get("team_name"),
+                    t.get("status"),
+                    t.get("current_members"),
+                    t.get("max_members"),
+                    t.get("expires_at"),
+                    t.get("last_sync"),
+                    t.get("error_count", 0)
+                ])
+            csv_data = output.getvalue()
+            output.close()
+            filename = f"teams_{get_now().strftime("%Y%m%d_%H%M%S")}.csv"
+            return Response(
+                content=csv_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        output = BytesIO()
+        workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+        worksheet = workbook.add_worksheet("Teams")
+        header_format = workbook.add_format({"bold": True, "fg_color": "#4F46E5", "font_color": "white", "border": 1})
+        cell_format = workbook.add_format({"border": 1})
+
+        headers = ["ID", "Email", "Account ID", "Team Name", "Status", "Current Members", "Max Members", "Expires At", "Last Sync", "Error Count"]
+        for col, header in enumerate(headers):
+            worksheet.write(0, col, header, header_format)
+
+        for row, t in enumerate(teams, start=1):
+            worksheet.write(row, 0, t.get("id"), cell_format)
+            worksheet.write(row, 1, t.get("email"), cell_format)
+            worksheet.write(row, 2, t.get("account_id") or "-", cell_format)
+            worksheet.write(row, 3, t.get("team_name") or "-", cell_format)
+            worksheet.write(row, 4, t.get("status"), cell_format)
+            worksheet.write(row, 5, t.get("current_members"), cell_format)
+            worksheet.write(row, 6, t.get("max_members"), cell_format)
+            worksheet.write(row, 7, t.get("expires_at") or "-", cell_format)
+            worksheet.write(row, 8, t.get("last_sync") or "-", cell_format)
+            worksheet.write(row, 9, t.get("error_count", 0), cell_format)
+
+        workbook.close()
+        excel_data = output.getvalue()
+        output.close()
+        filename = f"teams_{get_now().strftime("%Y%m%d_%H%M%S")}.xlsx"
+        return Response(
+            content=excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"?? Team ??: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"????: {str(e)}")
+
+@router.get("/records/export")
+async def export_records(
+    email: Optional[str] = None,
+    code: Optional[str] = None,
+    team_id: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    format: Optional[str] = "xlsx",
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """??????"""
+    try:
+        from fastapi.responses import Response
+        from io import BytesIO, StringIO
+        import csv
+        import xlsxwriter
+        from datetime import timedelta
+
+        try:
+            actual_team_id = int(team_id) if team_id and str(team_id).strip() else None
+        except (ValueError, TypeError):
+            actual_team_id = None
+
+        start_dt = None
+        end_dt = None
+        if start_date:
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            except Exception:
+                start_dt = None
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+            except Exception:
+                end_dt = None
+
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "export_records",
+            "record",
+            None,
+            "Exported records",
+            _get_client_ip(request)
+        )
+
+        records_result = await redemption_service.get_all_records(
+            db,
+            email=email,
+            code=code,
+            team_id=actual_team_id,
+            start_date=start_dt,
+            end_date=end_dt
+        )
+        records = records_result.get("records", [])
+
+        if format == "csv":
+            output = StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["ID", "Email", "Code", "Team ID", "Account ID", "Redeemed At"])
+            for r in records:
+                writer.writerow([
+                    r.get("id"),
+                    r.get("email"),
+                    r.get("code"),
+                    r.get("team_id"),
+                    r.get("account_id"),
+                    r.get("redeemed_at")
+                ])
+            csv_data = output.getvalue()
+            output.close()
+            filename = f"records_{get_now().strftime("%Y%m%d_%H%M%S")}.csv"
+            return Response(
+                content=csv_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        output = BytesIO()
+        workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+        worksheet = workbook.add_worksheet("Records")
+        header_format = workbook.add_format({"bold": True, "fg_color": "#4F46E5", "font_color": "white", "border": 1})
+        cell_format = workbook.add_format({"border": 1})
+
+        headers = ["ID", "Email", "Code", "Team ID", "Account ID", "Redeemed At"]
+        for col, header in enumerate(headers):
+            worksheet.write(0, col, header, header_format)
+
+        for row, r in enumerate(records, start=1):
+            worksheet.write(row, 0, r.get("id"), cell_format)
+            worksheet.write(row, 1, r.get("email"), cell_format)
+            worksheet.write(row, 2, r.get("code"), cell_format)
+            worksheet.write(row, 3, r.get("team_id"), cell_format)
+            worksheet.write(row, 4, r.get("account_id"), cell_format)
+            worksheet.write(row, 5, r.get("redeemed_at"), cell_format)
+
+        workbook.close()
+        excel_data = output.getvalue()
+        output.close()
+        filename = f"records_{get_now().strftime("%Y%m%d_%H%M%S")}.xlsx"
+        return Response(
+            content=excel_data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"??????: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"????: {str(e)}")
+
 async def update_code(
     code: str,
     update_data: CodeUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -851,6 +1289,16 @@ async def update_code(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=result
             )
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "update_code",
+            "code",
+            code,
+            f"Update code {code}",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(
@@ -861,6 +1309,7 @@ async def update_code(
 @router.post("/codes/bulk-update")
 async def bulk_update_codes(
     update_data: BulkCodeUpdateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -877,6 +1326,16 @@ async def bulk_update_codes(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=result
             )
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "bulk_update_codes",
+            "code",
+            None,
+            f"Bulk update {len(update_data.codes)} codes",
+            _get_client_ip(request)
+        )
+
         return JSONResponse(content=result)
     except Exception as e:
         return JSONResponse(
@@ -884,6 +1343,52 @@ async def bulk_update_codes(
             content={"success": False, "error": str(e)}
         )
 
+
+
+@router.get("/audit-logs", response_class=HTMLResponse)
+async def audit_logs_page(
+    request: Request,
+    page: int = 1,
+    actor: Optional[str] = None,
+    action: Optional[str] = None,
+    target_type: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    try:
+        from app.main import templates
+        logs_result = await audit_service.get_logs(
+            db,
+            page=page,
+            per_page=50,
+            actor=actor,
+            action=action,
+            target_type=target_type
+        )
+        logs = logs_result.get("logs", [])
+        return templates.TemplateResponse(
+            "admin/audit_logs.html",
+            {
+                "request": request,
+                "user": current_user,
+                "active_page": "audit_logs",
+                "logs": logs,
+                "filters": {
+                    "actor": actor,
+                    "action": action,
+                    "target_type": target_type
+                },
+                "pagination": {
+                    "current_page": logs_result.get("current_page", page),
+                    "total_pages": logs_result.get("total_pages", 1),
+                    "total": logs_result.get("total", 0),
+                    "per_page": 50
+                }
+            }
+        )
+    except Exception as e:
+        logger.error(f"????????: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.get("/records", response_class=HTMLResponse)
 async def records_page(
@@ -930,38 +1435,34 @@ async def records_page(
         except (ValueError, TypeError):
             page_int = 1
             
+        start_dt = None
+        end_dt = None
+        if start_date:
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            except Exception:
+                start_dt = None
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+            except Exception:
+                end_dt = None
+
         logger.info(f"管理员访问使用记录页面 (page={page_int})")
 
         # 获取记录 (支持邮箱、兑换码、Team ID 筛选)
         records_result = await redemption_service.get_all_records(
-            db, 
-            email=email, 
-            code=code, 
-            team_id=actual_team_id
+            db,
+            email=email,
+            code=code,
+            team_id=actual_team_id,
+            start_date=start_dt,
+            end_date=end_dt
         )
         all_records = records_result.get("records", [])
 
         # 仅由于日期范围筛选目前还在内存中处理，如果未来记录数极大可以移至数据库
-        filtered_records = []
-        for record in all_records:
-            # 日期范围筛选
-            if start_date or end_date:
-                try:
-                    record_date = datetime.fromisoformat(record["redeemed_at"]).date()
-
-                    if start_date:
-                        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-                        if record_date < start:
-                            continue
-
-                    if end_date:
-                        end = datetime.strptime(end_date, "%Y-%m-%d").date()
-                        if record_date > end:
-                            continue
-                except:
-                    pass
-
-            filtered_records.append(record)
+        filtered_records = all_records
 
         # 获取Team信息并关联到记录
         teams_result = await team_service.get_all_teams(db)
@@ -1056,6 +1557,7 @@ async def records_page(
 @router.post("/records/{record_id}/withdraw")
 async def withdraw_record(
     record_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin)
 ):
@@ -1079,6 +1581,16 @@ async def withdraw_record(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 content=result
             )
+
+        await audit_service.log_action(
+            db,
+            current_user.get("username", "admin"),
+            "withdraw_record",
+            "record",
+            str(record_id),
+            f"Withdraw record {record_id}",
+            _get_client_ip(request)
+        )
 
         return JSONResponse(content=result)
 

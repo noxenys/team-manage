@@ -3,6 +3,7 @@ Team 管理服务
 用于管理 Team 账号的导入、同步、成员管理等功能
 """
 import logging
+import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from sqlalchemy import select, update, delete, func
@@ -595,6 +596,33 @@ class TeamService:
             logger.error(f"获取 Team 信息失败: {e}")
             return {"success": False, "error": str(e)}
 
+
+    def _validate_import_line(self, line: str, line_no: int) -> Dict[str, Any]:
+        """Validate a single import line for batch import."""
+        parsed = self.token_parser.parse_team_import_text(line)
+        if not parsed:
+            return {"valid": False, "error": "No token/session/refresh token found"}
+        item = parsed[0]
+        token = item.get("token")
+        email = item.get("email")
+        account_id = item.get("account_id")
+        refresh_token = item.get("refresh_token")
+        session_token = item.get("session_token")
+        client_id = item.get("client_id")
+
+        if token and not self.token_parser.validate_jwt_format(token):
+            return {"valid": False, "error": "Access token format is invalid"}
+        if email and not self.token_parser.validate_email_format(email):
+            return {"valid": False, "error": "Email format is invalid"}
+        if account_id and not self.token_parser.validate_account_id_format(account_id):
+            return {"valid": False, "error": "Account ID format is invalid"}
+        if not token and not session_token and not refresh_token:
+            return {"valid": False, "error": "Missing token/session/refresh token"}
+        if not token and refresh_token and not client_id:
+            return {"valid": False, "error": "Client ID required when using refresh token"}
+
+        return {"valid": True, "item": item}
+
     async def import_team_batch(
         self,
         text: str,
@@ -611,37 +639,65 @@ class TeamService:
             各阶段进度的 Dict
         """
         try:
-            # 1. 解析文本
-            parsed_data = self.token_parser.parse_team_import_text(text)
+            # 1. Parse and validate lines
+            lines = text.strip().split("\n")
+            valid_data = []
+            errors = []
+            seen_keys = set()
 
-            if not parsed_data:
+            for i, line in enumerate(lines, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                check = self._validate_import_line(line, i)
+                if not check.get("valid"):
+                    errors.append({
+                        "line": i,
+                        "raw": line,
+                        "error": check.get("error") or "Invalid record"
+                    })
+                    continue
+
+                item = check.get("item") or {}
+                key = item.get("token") or item.get("session_token") or item.get("refresh_token")
+                if key in seen_keys:
+                    errors.append({
+                        "line": i,
+                        "raw": line,
+                        "error": "Duplicate token record"
+                    })
+                    continue
+
+                seen_keys.add(key)
+                item["_line"] = i
+                valid_data.append(item)
+
+            if errors:
+                yield {
+                    "type": "validation",
+                    "invalid_count": len(errors),
+                    "errors": errors[:50]
+                }
+
+            if not valid_data:
                 yield {
                     "type": "error",
-                    "error": "未能从文本中提取任何 Token"
+                    "error": "No valid records to import"
                 }
                 return
 
-            # 1.1 按 AT 去重 (防止重复处理同一个 Token 下的多个账号或重复行)
-            seen_tokens = set()
-            unique_data = []
-            for item in parsed_data:
-                token = item.get("token")
-                if token and token not in seen_tokens:
-                    seen_tokens.add(token)
-                    unique_data.append(item)
-            
-            parsed_data = unique_data
-            total = len(parsed_data)
+            total = len(valid_data)
             yield {
                 "type": "start",
-                "total": total
+                "total": total,
+                "invalid_count": len(errors)
             }
 
             # 2. 逐个导入
             success_count = 0
             failed_count = 0
 
-            for i, data in enumerate(parsed_data):
+            for i, data in enumerate(valid_data):
                 result = await self.import_team_single(
                     access_token=data.get("token"),
                     db_session=db_session,
@@ -679,7 +735,8 @@ class TeamService:
                 "type": "finish",
                 "total": total,
                 "success_count": success_count,
-                "failed_count": failed_count
+                "failed_count": failed_count,
+                "invalid_count": len(errors)
             }
 
         except Exception as e:
@@ -888,7 +945,9 @@ class TeamService:
 
     async def sync_all_teams(
         self,
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        retry_count: int = 0,
+        retry_delay_seconds: int = 5
     ) -> Dict[str, Any]:
         """
         同步所有 Team 的信息
@@ -921,7 +980,13 @@ class TeamService:
             failed_count = 0
 
             for team in teams:
-                result = await self.sync_team_info(team.id, db_session)
+                attempt = 0
+                while True:
+                    result = await self.sync_team_info(team.id, db_session)
+                    if result["success"] or attempt >= retry_count:
+                        break
+                    attempt += 1
+                    await asyncio.sleep(retry_delay_seconds)
 
                 if result["success"]:
                     success_count += 1
@@ -933,7 +998,8 @@ class TeamService:
                     "email": team.email,
                     "success": result["success"],
                     "message": result["message"],
-                    "error": result["error"]
+                    "error": result["error"],
+                    "attempts": attempt + 1
                 })
 
             logger.info(f"批量同步完成: 总数 {len(teams)}, 成功 {success_count}, 失败 {failed_count}")
@@ -1585,7 +1651,11 @@ class TeamService:
         db_session: AsyncSession,
         page: int = 1,
         per_page: int = 20,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        expires_before: Optional[datetime] = None,
+        expires_after: Optional[datetime] = None,
+        error_count_min: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         获取所有 Team 列表 (用于管理员页面)
@@ -1615,6 +1685,18 @@ class TeamService:
                         cast(Team.id, String).ilike(search_filter)
                     )
                 )
+
+            if status:
+                stmt = stmt.where(Team.status == status)
+
+            if expires_before:
+                stmt = stmt.where(Team.expires_at.is_not(None), Team.expires_at <= expires_before)
+
+            if expires_after:
+                stmt = stmt.where(Team.expires_at.is_not(None), Team.expires_at >= expires_after)
+
+            if error_count_min is not None:
+                stmt = stmt.where(Team.error_count >= error_count_min)
 
             # 3. 获取总数
             count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -1650,6 +1732,7 @@ class TeamService:
                     "current_members": team.current_members,
                     "max_members": team.max_members,
                     "status": team.status,
+                    "error_count": team.error_count or 0,
                     "last_sync": team.last_sync.isoformat() if team.last_sync else None,
                     "created_at": team.created_at.isoformat() if team.created_at else None
                 })

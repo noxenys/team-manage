@@ -43,13 +43,13 @@
 <div class="section-header">
     <div class="header-group">
         <div class="filter-tabs">
-            <button onclick="filterByStatus('all')" class="filter-tab active" id="filter-all">全部</button>
-            <button onclick="filterByStatus('unused')" class="filter-tab" id="filter-unused">未使用</button>
-            <button onclick="filterByStatus('used')" class="filter-tab" id="filter-used">已使用</button>
-            <button onclick="filterByStatus('expired')" class="filter-tab" id="filter-expired">已过期</button>
+            <button onclick="filterByStatus('all')" class="filter-tab {% if not filters.status or filters.status == 'all' %}active{% endif %}" id="filter-all">全部</button>
+            <button onclick="filterByStatus('unused')" class="filter-tab {% if filters.status == 'unused' %}active{% endif %}" id="filter-unused">未使用</button>
+            <button onclick="filterByStatus('used')" class="filter-tab {% if filters.status == 'used' %}active{% endif %}" id="filter-used">已使用</button>
+            <button onclick="filterByStatus('expired')" class="filter-tab {% if filters.status == 'expired' %}active{% endif %}" id="filter-expired">已过期</button>
         </div>
 
-        <form action="/admin/codes" method="get" class="search-form">
+        <form action="/admin/codes" method="get" class="search-form" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
             <div class="input-group-clean">
                 <i data-lucide="search" style="width: 14px; height: 14px;"></i>
                 <input type="text" name="search" value="{{ search or '' }}" placeholder="搜索兑换码..."
@@ -60,6 +60,9 @@
                 </a>
                 {% endif %}
             </div>
+            <input type="date" name="expires_before" value="{{ filters.expires_before or '' }}" class="form-control" style="width: 140px;" title="到期时间<=">
+            <input type="date" name="expires_after" value="{{ filters.expires_after or '' }}" class="form-control" style="width: 140px;" title="到期时间>=">
+            <input type="hidden" name="status" value="{{ filters.status or "" }}">
         </form>
     </div>
 
@@ -179,10 +182,14 @@
     {% if pagination and pagination.total_pages > 1 %}
     <div class="pagination">
         {% set search_param = '&search=' + search if search else '' %}
+        {% set status_param = '&status=' + filters.status if filters.status else '' %}
+        {% set expires_before_param = '&expires_before=' + filters.expires_before if filters.expires_before else '' %}
+        {% set expires_after_param = '&expires_after=' + filters.expires_after if filters.expires_after else '' %}
+        {% set filter_params = search_param + status_param + expires_before_param + expires_after_param %}
 
         {% if pagination.current_page > 1 %}
-        <a href="?page=1{{ search_param }}" class="btn btn-sm btn-secondary">首页</a>
-        <a href="?page={{ pagination.current_page - 1 }}{{ search_param }}" class="btn btn-sm btn-secondary">
+        <a href="?page=1{{ filter_params }}" class="btn btn-sm btn-secondary">首页</a>
+        <a href="?page={{ pagination.current_page - 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
             <i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i>
         </a>
         {% endif %}
@@ -190,10 +197,10 @@
         <span class="pagination-info">第 {{ pagination.current_page }} / {{ pagination.total_pages }} 页</span>
 
         {% if pagination.current_page < pagination.total_pages %} <a
-            href="?page={{ pagination.current_page + 1 }}{{ search_param }}" class="btn btn-sm btn-secondary">
+            href="?page={{ pagination.current_page + 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
             <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
             </a>
-            <a href="?page={{ pagination.total_pages }}{{ search_param }}" class="btn btn-sm btn-secondary">末页</a>
+            <a href="?page={{ pagination.total_pages }}{{ filter_params }}" class="btn btn-sm btn-secondary">末页</a>
             {% endif %}
     </div>
     {% endif %}
@@ -397,12 +404,14 @@
 
     // 按状态筛选
     function filterByStatus(status) {
-        currentFilter = status;
-
-        // 更新按钮状态
-        document.querySelectorAll('.filter-tab').forEach(btn => {
-            btn.classList.remove('active');
-        });
+        const params = new URLSearchParams(window.location.search);
+        if (status === "all") {
+            params.delete("status");
+        } else {
+            params.set("status", status);
+        }
+        window.location.search = params.toString();
+    }
         document.getElementById(`filter-${status}`).classList.add('active');
 
         // 筛选表格行
@@ -455,9 +464,27 @@
     // 导出兑换码
     async function exportCodes() {
         try {
-            const urlParams = new URLSearchParams(window.location.search);
-            const search = urlParams.get('search') || '';
-            const exportUrl = `/admin/codes/export${search ? '?search=' + encodeURIComponent(search) : ''}`;
+            const params = new URLSearchParams(window.location.search);
+            const exportUrl = `/admin/codes/export?${params.toString()}`;
+            const response = await fetch(exportUrl);
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "redemption_codes.xlsx";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            } else {
+                const errorData = await response.json();
+                showToast(errorData.error || "????", "error");
+            }
+        } catch (error) {
+            showToast("????", "error");
+        }
+    }
 
             const response = await fetch(exportUrl);
 

@@ -3,6 +3,7 @@ GPT Team 管理和兑换码自动邀请系统
 FastAPI 应用入口文件
 """
 from fastapi import FastAPI, Request
+import asyncio
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -17,12 +18,34 @@ from app.routes import redeem, auth, admin, api, user, warranty
 from app.config import settings
 from app.database import init_db, close_db, AsyncSessionLocal
 from app.services.auth import auth_service
+from app.services.team import TeamService
 
 # 获取项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
 APP_DIR = BASE_DIR / "app"
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+team_service = TeamService()
+
+_sync_task = None
+
+async def periodic_sync():
+    while True:
+        try:
+            if not settings.sync_enabled:
+                await asyncio.sleep(5)
+                continue
+            async with AsyncSessionLocal() as session:
+                await team_service.sync_all_teams(
+                    session,
+                    retry_count=settings.sync_retry_count,
+                    retry_delay_seconds=settings.sync_retry_delay_seconds
+                )
+        except Exception as e:
+            logger.error(f"Periodic sync failed: {e}")
+        await asyncio.sleep(settings.sync_interval_minutes * 60)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -88,7 +111,7 @@ app.add_middleware(
     session_cookie="session",
     max_age=14 * 24 * 60 * 60,  # 14 天
     same_site="lax",
-    https_only=False  # 开发环境设为 False，生产环境应设为 True
+    https_only=not settings.debug  # 开发环境设为 False，生产环境应设为 True
 )
 
 # 配置静态文件

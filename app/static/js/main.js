@@ -282,6 +282,23 @@ async function handleBatchImport(event) {
 
                     if (data.type === 'start') {
                         progressStage.textContent = `开始导入 (共 ${data.total} 条)...`;
+                    } else if (data.type === 'validation') {
+                        // validation errors before import
+                        if (data.errors && Array.isArray(data.errors)) {
+                            resultsContainer.style.display = 'block';
+                            data.errors.forEach(err => {
+                                const row = document.createElement('tr');
+                                row.innerHTML = `
+                                    <td>? ${err.line || '-'}${err.raw ? ' / ' + err.raw : ''}</td>
+                                    <td class="text-danger">????</td>
+                                    <td>${err.error || '????'}</td>
+                                `;
+                                resultsBody.insertBefore(row, resultsBody.firstChild);
+                            });
+                        }
+                        if (typeof data.invalid_count === 'number') {
+                            failedCountEl.textContent = data.invalid_count;
+                        }
                     } else if (data.type === 'progress') {
                         const percent = Math.round((data.current / data.total) * 100);
                         progressBar.style.width = `${percent}%`;

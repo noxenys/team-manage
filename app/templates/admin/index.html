@@ -56,6 +56,9 @@
                     {% endif %}
                 </div>
             </form>
+            <button onclick="exportTeams()" class="btn btn-secondary">
+                <i data-lucide="download" style="width: 16px; height: 16px;"></i> ?? Team
+            </button>
             <button onclick="showModal('importTeamModal')" class="btn btn-primary">
                 <i data-lucide="plus-circle" style="width: 16px; height: 16px;"></i> 导入 Team
             </button>
@@ -145,10 +148,15 @@
     {% if pagination and pagination.total_pages > 1 %}
     <div class="pagination">
         {% set search_param = '&search=' + search if search else '' %}
+        {% set status_param = '&status=' + filters.status if filters.status else '' %}
+        {% set expires_before_param = '&expires_before=' + filters.expires_before if filters.expires_before else '' %}
+        {% set expires_after_param = '&expires_after=' + filters.expires_after if filters.expires_after else '' %}
+        {% set error_count_param = '&error_count_min=' + filters.error_count_min|string if filters.error_count_min else '' %}
+        {% set filter_params = search_param + status_param + expires_before_param + expires_after_param + error_count_param %}
 
         {% if pagination.current_page > 1 %}
-        <a href="?page=1{{ search_param }}" class="btn btn-sm btn-secondary">首页</a>
-        <a href="?page={{ pagination.current_page - 1 }}{{ search_param }}" class="btn btn-sm btn-secondary">
+        <a href="?page=1{{ filter_params }}" class="btn btn-sm btn-secondary">首页</a>
+        <a href="?page={{ pagination.current_page - 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
             <i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i>
         </a>
         {% endif %}
@@ -156,17 +164,20 @@
         <span class="pagination-info">第 {{ pagination.current_page }} / {{ pagination.total_pages }} 页</span>
 
         {% if pagination.current_page < pagination.total_pages %} <a
-            href="?page={{ pagination.current_page + 1 }}{{ search_param }}" class="btn btn-sm btn-secondary">
+            href="?page={{ pagination.current_page + 1 }}{{ filter_params }}" class="btn btn-sm btn-secondary">
             <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
             </a>
-            <a href="?page={{ pagination.total_pages }}{{ search_param }}" class="btn btn-sm btn-secondary">末页</a>
+            <a href="?page={{ pagination.total_pages }}{{ filter_params }}" class="btn btn-sm btn-secondary">末页</a>
             {% endif %}
     </div>
     {% endif %}
     {% else %}
     <div class="empty-state">
         <p>暂无 Team 数据</p>
-        <button onclick="showModal('importTeamModal')" class="btn btn-primary">立即导入</button>
+        <button onclick="exportTeams()" class="btn btn-secondary">
+                <i data-lucide="download" style="width: 16px; height: 16px;"></i> ?? Team
+            </button>
+            <button onclick="showModal('importTeamModal')" class="btn btn-primary">立即导入</button>
     </div>
     {% endif %}
 </div>
@@ -235,6 +246,13 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+    function exportTeams() {
+        const params = new URLSearchParams(window.location.search);
+        const url = `/admin/teams/export?${params.toString()}`;
+        window.location.href = url;
+    }
+</script>
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         // 绑定查看成员按钮

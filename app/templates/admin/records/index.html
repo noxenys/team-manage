@@ -88,6 +88,11 @@
             <h3>使用记录列表</h3>
             <span class="badge badge-info">{{ pagination.total }} 条记录</span>
         </div>
+        <div>
+            <button onclick="exportRecords()" class="btn btn-secondary">
+                <i data-lucide="download" style="width: 16px; height: 16px;"></i> 导出
+            </button>
+        </div>
         <div class="record-pagination-info">
             第 {{ pagination.current_page }}/{{ pagination.total_pages }} 页
         </div>
@@ -221,6 +226,16 @@
                 event.currentTarget.disabled = false;
             }
         }
+    }
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function exportRecords() {
+        const params = new URLSearchParams(window.location.search);
+        const url = `/admin/records/export?${params.toString()}`;
+        window.location.href = url;
     }
 </script>
 {% endblock %}
