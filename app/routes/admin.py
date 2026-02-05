@@ -1259,7 +1259,7 @@ async def export_records(
         workbook.close()
         excel_data = output.getvalue()
         output.close()
-        filename = f"records_{get_now().strftime("%Y%m%d_%H%M%S")}.xlsx"
+        filename = f"records_{get_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return Response(
             content=excel_data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
