@@ -1116,7 +1116,7 @@ async def export_teams(
                 ])
             csv_data = output.getvalue()
             output.close()
-            filename = f"teams_{get_now().strftime("%Y%m%d_%H%M%S")}.csv"
+            filename = f"teams_{get_now().strftime('%Y%m%d_%H%M%S')}.csv"
             return Response(
                 content=csv_data,
                 media_type="text/csv",
@@ -1148,7 +1148,7 @@ async def export_teams(
         workbook.close()
         excel_data = output.getvalue()
         output.close()
-        filename = f"teams_{get_now().strftime("%Y%m%d_%H%M%S")}.xlsx"
+        filename = f"teams_{get_now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         return Response(
             content=excel_data,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1231,7 +1231,7 @@ async def export_records(
                 ])
             csv_data = output.getvalue()
             output.close()
-            filename = f"records_{get_now().strftime("%Y%m%d_%H%M%S")}.csv"
+            filename = f"records_{get_now().strftime('%Y%m%d_%H%M%S')}.csv"
             return Response(
                 content=csv_data,
                 media_type="text/csv",
